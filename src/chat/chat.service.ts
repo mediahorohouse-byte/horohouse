@@ -231,12 +231,23 @@ export class ChatService implements OnModuleInit {
             ]);
 
             // Format conversations for response
+            // After .lean(), a populated userId is a plain object with ._id;
+            // if the user was deleted, population fails and userId stays as a
+            // raw ObjectId — handle both forms to avoid crashes (500).
+            const resolveId = (raw: any): string => {
+                if (!raw) return '';
+                if (typeof raw === 'string') return raw;
+                if (raw._id) return raw._id.toString();
+                if (typeof raw.toString === 'function') return raw.toString();
+                return '';
+            };
+
             const formattedConversations = conversations.map(conv => {
                 const currentUserParticipant = conv.participants.find(
-                    p => p.userId._id.toString() === userId,
+                    p => resolveId(p.userId) === userId,
                 );
                 const otherParticipant = conv.participants.find(
-                    p => p.userId._id.toString() !== userId,
+                    p => resolveId(p.userId) !== userId,
                 );
 
                 return {
