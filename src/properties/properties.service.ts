@@ -233,6 +233,9 @@ export class PropertiesService implements OnModuleInit {
         cancellationPolicy: createPropertyDto.cancellationPolicy ?? CancellationPolicy.FLEXIBLE,
         advanceNoticeDays: createPropertyDto.advanceNoticeDays ?? 0,
         bookingWindowDays: createPropertyDto.bookingWindowDays ?? 365,
+        originalPrice: createPropertyDto.originalPrice ?? null,
+        customDiscountNights: createPropertyDto.customDiscountNights ?? null,
+        customDiscountPercent: createPropertyDto.customDiscountPercent ?? null,
         unavailableDates: [],
       });
 
@@ -436,7 +439,7 @@ export class PropertiesService implements OnModuleInit {
       // Fetch only the fields we need for the permission check — not the full document
       const property = await this.propertyModel
         .findById(id)
-        .select('ownerId agentId title description city type')
+        .select('ownerId agentId title description city type price originalPrice')
         .lean()
         .exec();
 
@@ -470,6 +473,23 @@ export class PropertiesService implements OnModuleInit {
           city: updatePropertyDto.city || (property as any).city,
           type: updatePropertyDto.type || (property as any).type,
         } as any);
+      }
+
+      // Automatically track price discount / crossed-out original price
+      if (updatePropertyDto.originalPrice !== undefined) {
+        (updatePropertyDto as any).originalPrice = updatePropertyDto.originalPrice;
+      } else if (updatePropertyDto.price !== undefined) {
+        const currentPrice = Number((property as any).price);
+        const currentOriginalPrice = (property as any).originalPrice ? Number((property as any).originalPrice) : null;
+        const newPrice = Number(updatePropertyDto.price);
+
+        if (newPrice < currentPrice) {
+          // Price decreased: preserve or record previous price as originalPrice
+          (updatePropertyDto as any).originalPrice = currentOriginalPrice || currentPrice;
+        } else if (currentOriginalPrice && newPrice >= currentOriginalPrice) {
+          // Price increased back to or above original price: remove discount
+          (updatePropertyDto as any).originalPrice = null;
+        }
       }
 
       const updatedProperty = await this.propertyModel

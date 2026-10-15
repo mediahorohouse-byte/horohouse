@@ -94,6 +94,12 @@ export class CreatePropertyDto {
   @Min(0)
   price: number;
 
+  @ApiPropertyOptional({ example: 30000, description: 'Original price before price reduction' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  originalPrice?: number;
+
   @ApiPropertyOptional({ example: 'XAF' })
   @IsOptional()
   @IsString()
@@ -212,6 +218,19 @@ export class CreatePropertyDto {
   @Min(0)
   @Max(100)
   monthlyDiscountPercent?: number;
+
+  @ApiPropertyOptional({ example: 4, description: 'Minimum number of nights required to qualify for custom stay discount' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  customDiscountNights?: number;
+
+  @ApiPropertyOptional({ example: 5, description: 'Custom discount percentage applied when stay duration reaches customDiscountNights' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  customDiscountPercent?: number;
 
   @ApiPropertyOptional({ type: ShortTermAmenitiesDto })
   @IsOptional()

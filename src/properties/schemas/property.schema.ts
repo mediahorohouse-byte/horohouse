@@ -237,6 +237,9 @@ export class Property {
   @Prop({ required: true })
   price: number;
 
+  @Prop({ type: Number, default: null })
+  originalPrice?: number | null;
+
   @Prop({ default: 'XAF' })
   currency?: string;
 
@@ -327,6 +330,12 @@ export class Property {
 
   @Prop({ default: 15, min: 0, max: 100 })
   monthlyDiscountPercent: number;
+
+  @Prop({ type: Number, default: null })
+  customDiscountNights?: number | null;
+
+  @Prop({ type: Number, default: null })
+  customDiscountPercent?: number | null;
 
   @Prop({
     type: [

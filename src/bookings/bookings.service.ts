@@ -823,6 +823,8 @@ export class BookingsService {
       nights,
       property.weeklyDiscountPercent ?? 10,
       property.monthlyDiscountPercent ?? 15,
+      property.customDiscountNights,
+      property.customDiscountPercent,
     );
     const totalAmount = subtotal + cleaningFee + serviceFee + taxAmount - discountAmount;
 
@@ -839,18 +841,28 @@ export class BookingsService {
   }
 
   /**
-   * Apply weekly (≥7 nights) or monthly (≥28 nights) discount using
-   * the host-configured percentage rates stored on the property.
+   * Apply weekly (≥7 nights), monthly (≥28 nights), or custom length-of-stay discount (e.g. -5% from 4 nights)
+   * using host-configured percentage rates stored on the property.
    */
   private computeDiscount(
     subtotal: number,
     nights: number,
     weeklyPct: number,
     monthlyPct: number,
+    customNights?: number,
+    customPct?: number,
   ): number {
-    if (nights >= 28) return Math.round(subtotal * (monthlyPct / 100));
-    if (nights >= 7) return Math.round(subtotal * (weeklyPct / 100));
-    return 0;
+    let effectivePct = 0;
+    if (nights >= 28 && monthlyPct > 0) {
+      effectivePct = Math.max(effectivePct, monthlyPct);
+    }
+    if (nights >= 7 && weeklyPct > 0) {
+      effectivePct = Math.max(effectivePct, weeklyPct);
+    }
+    if (customNights && customPct && nights >= customNights && customPct > 0) {
+      effectivePct = Math.max(effectivePct, customPct);
+    }
+    return effectivePct > 0 ? Math.round(subtotal * (effectivePct / 100)) : 0;
   }
 
   /**
