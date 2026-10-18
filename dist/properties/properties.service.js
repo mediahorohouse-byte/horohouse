@@ -128,6 +128,9 @@ let PropertiesService = PropertiesService_1 = class PropertiesService {
                 cancellationPolicy: createPropertyDto.cancellationPolicy ?? property_schema_1.CancellationPolicy.FLEXIBLE,
                 advanceNoticeDays: createPropertyDto.advanceNoticeDays ?? 0,
                 bookingWindowDays: createPropertyDto.bookingWindowDays ?? 365,
+                originalPrice: createPropertyDto.originalPrice ?? null,
+                customDiscountNights: createPropertyDto.customDiscountNights ?? null,
+                customDiscountPercent: createPropertyDto.customDiscountPercent ?? null,
                 unavailableDates: [],
             });
             const savedProperty = await property.save();
@@ -265,7 +268,7 @@ let PropertiesService = PropertiesService_1 = class PropertiesService {
         try {
             const property = await this.propertyModel
                 .findById(id)
-                .select('ownerId agentId title description city type')
+                .select('ownerId agentId title description city type price originalPrice')
                 .lean()
                 .exec();
             if (!property)
@@ -292,6 +295,20 @@ let PropertiesService = PropertiesService_1 = class PropertiesService {
                     city: updatePropertyDto.city || property.city,
                     type: updatePropertyDto.type || property.type,
                 });
+            }
+            if (updatePropertyDto.originalPrice !== undefined) {
+                updatePropertyDto.originalPrice = updatePropertyDto.originalPrice;
+            }
+            else if (updatePropertyDto.price !== undefined) {
+                const currentPrice = Number(property.price);
+                const currentOriginalPrice = property.originalPrice ? Number(property.originalPrice) : null;
+                const newPrice = Number(updatePropertyDto.price);
+                if (newPrice < currentPrice) {
+                    updatePropertyDto.originalPrice = currentOriginalPrice || currentPrice;
+                }
+                else if (currentOriginalPrice && newPrice >= currentOriginalPrice) {
+                    updatePropertyDto.originalPrice = null;
+                }
             }
             const updatedProperty = await this.propertyModel
                 .findByIdAndUpdate(id, updatePropertyDto, { new: true })
@@ -1057,9 +1074,14 @@ let PropertiesService = PropertiesService_1 = class PropertiesService {
             slug: 1,
             description: 1,
             price: 1,
+            originalPrice: 1,
             pricingUnit: 1,
             type: 1,
             listingType: 1,
+            weeklyDiscountPercent: 1,
+            monthlyDiscountPercent: 1,
+            customDiscountNights: 1,
+            customDiscountPercent: 1,
             city: 1,
             address: 1,
             neighborhood: 1,

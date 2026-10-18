@@ -6,7 +6,7 @@ import { v2 as cloudinary } from 'cloudinary';
 
 import { User, UserDocument, UserRole, UserPreferences, TenantRecord, HostVerificationStatus, PayoutMethod, HostPayoutRecord } from './schemas/user.schema';
 import { CreateUserDto, UpdateUserDto, UpdatePreferencesDto, CreateTenantDto, UpdateTenantDto } from './dto';
-import { Property, PropertyDocument, PropertyImages, PropertyStatus } from 'src/properties/schemas/property.schema';
+import { Property, PropertyDocument, PropertyImages, PropertyStatus, ListingType } from 'src/properties/schemas/property.schema';
 import { ReviewsService } from 'src/reviews/reviews.service';
 
 @Injectable()
@@ -332,6 +332,15 @@ export class UsersService {
     }
   }
 
+  async removeProfilePicture(userId: string): Promise<User> {
+    const user = await this.userModel
+      .findByIdAndUpdate(userId, { $unset: { profilePicture: '' } }, { new: true })
+      .select('-firebaseUid')
+      .exec();
+    if (!user) throw new NotFoundException('User not found');
+    this.logger.log(`✅ Profile picture removed for user: ${userId}`);
+    return user;
+  }
 
   /**
    * Add property to favorites
@@ -704,7 +713,7 @@ export class UsersService {
             $size: {
               $filter: {
                 input: '$properties',
-                cond: { $eq: ['$$this.status', 'available'] },
+                cond: { $eq: ['$$this.availability', PropertyStatus.ACTIVE] },
               },
             },
           },
@@ -766,7 +775,7 @@ export class UsersService {
             $size: {
               $filter: {
                 input: '$properties',
-                cond: { $eq: ['$$this.status', 'available'] },
+                cond: { $eq: ['$$this.availability', PropertyStatus.ACTIVE] },
               },
             },
           },
@@ -974,10 +983,10 @@ export class UsersService {
     }
 
     const agent = await this.userModel
-      .findOne({ 
-        _id: agentId, 
-        role: { $in: [UserRole.AGENT, UserRole.LANDLORD, UserRole.HOST] }, 
-        isActive: true 
+      .findOne({
+        _id: agentId,
+        role: { $in: [UserRole.AGENT, UserRole.LANDLORD, UserRole.HOST] },
+        isActive: true
       })
       .exec();
 
@@ -1027,22 +1036,40 @@ export class UsersService {
     ]);
 
     // Map properties to frontend format
-    const mappedProperties = properties.map(p => {
-      const prop = p.toObject(); // Convert to plain object
+    const mappedProperties = properties.map((p) => {
+      const prop: any = p.toObject();
+      const pid = (p._id as Types.ObjectId).toString();
       return {
-        id: (p._id as Types.ObjectId).toString(),
-        images: (prop.images || []).map((img: PropertyImages) => img.url),
+        id: pid,
+        _id: pid,
+        title: prop.title,
+        images: prop.images || [], // keep [{url}] like the rest of the API; the card handles both
         price: prop.price,
+        originalPrice: prop.originalPrice,
+        currency: prop.currency,
+        pricingUnit: prop.pricingUnit,
         address: prop.address,
         city: prop.city,
-        state: prop.country,
+        neighborhood: prop.neighborhood,
+        country: prop.country,
+        type: prop.type,
+        listingType: prop.listingType,
+        amenities: prop.amenities,
         bedrooms: prop.amenities?.bedrooms || 0,
         bathrooms: prop.amenities?.bathrooms || 0,
         squareFeet: prop.area || 0,
+        averageRating: prop.averageRating,
+        reviewCount: prop.reviewCount,
+        isVerified: prop.isVerified,
+        isFeatured: prop.isFeatured,
+        customDiscountNights: prop.customDiscountNights,
+        customDiscountPercent: prop.customDiscountPercent,
+        weeklyDiscountPercent: prop.weeklyDiscountPercent,
+        monthlyDiscountPercent: prop.monthlyDiscountPercent,
+        createdAt: prop.createdAt,
+        updatedAt: prop.updatedAt,
         status: this.mapAvailabilityToStatus(prop.availability, prop.listingType),
-        propertyType: this.capitalizePropertyType(prop.type),
         soldDate: prop.availability === PropertyStatus.SOLD ? p.updatedAt.toISOString() : undefined,
-        listingType: prop.listingType,
         latitude: prop.location?.coordinates?.[1] || prop.latitude,
         longitude: prop.location?.coordinates?.[0] || prop.longitude,
       };
@@ -1855,11 +1882,11 @@ export class UsersService {
       // Host profile (sensitive fields stripped)
       hostProfile: hp
         ? {
-            ...hp,
-            payoutAccounts: payoutAccountsSummary,
-            totalEarnings: undefined,
-            currentMonthEarnings: undefined,
-          }
+          ...hp,
+          payoutAccounts: payoutAccountsSummary,
+          totalEarnings: undefined,
+          currentMonthEarnings: undefined,
+        }
         : null,
       createdAt: host.createdAt,
     };
@@ -1894,9 +1921,9 @@ export class UsersService {
     const occupancyRate =
       listingStats.totalListings > 0
         ? Math.min(
-            Math.round(((hp?.completedStays ?? 0) / (listingStats.totalListings * 30)) * 100),
-            100,
-          )
+          Math.round(((hp?.completedStays ?? 0) / (listingStats.totalListings * 30)) * 100),
+          100,
+        )
         : 0;
 
     return {
@@ -2193,12 +2220,12 @@ export class UsersService {
     const reason = qualifies
       ? undefined
       : [
-          !meetsResponseRate && `responseRate ${hp.responseRate ?? 0}% < 90%`,
-          !meetsRating && `rating ${reviewStats.averageRating} < 4.8`,
-          !meetsStays && `completedStays ${hp.completedStays ?? 0} < 10`,
-        ]
-          .filter(Boolean)
-          .join('; ');
+        !meetsResponseRate && `responseRate ${hp.responseRate ?? 0}% < 90%`,
+        !meetsRating && `rating ${reviewStats.averageRating} < 4.8`,
+        !meetsStays && `completedStays ${hp.completedStays ?? 0} < 10`,
+      ]
+        .filter(Boolean)
+        .join('; ');
 
     this.logger.log(
       `🏅 Superhost recalculated for ${id}: ${qualifies ? 'GRANTED' : 'DENIED'}${reason ? ` (${reason})` : ''}`,
@@ -2294,14 +2321,12 @@ export class UsersService {
     totalListings: number;
     activeListings: number;
   }> {
-    const hostObjectId = new Types.ObjectId(hostId);
-
     const result = await this.propertyModel.aggregate([
       {
         $match: {
-          ownerId: hostObjectId,
+          ownerId: new Types.ObjectId(hostId),
           isActive: true,
-          listingType: 'short-term',
+          listingType: ListingType.SHORT_TERM,
         },
       },
       {
@@ -2309,21 +2334,15 @@ export class UsersService {
           _id: null,
           totalListings: { $sum: 1 },
           activeListings: {
-            $sum: {
-              $cond: [{ $eq: ['$availability', 'available'] }, 1, 0],
-            },
+            $sum: { $cond: [{ $eq: ['$availability', PropertyStatus.ACTIVE] }, 1, 0] },
           },
         },
       },
     ]);
 
-    if (!result || result.length === 0) {
-      return { totalListings: 0, activeListings: 0 };
-    }
-
     return {
-      totalListings: result[0].totalListings ?? 0,
-      activeListings: result[0].activeListings ?? 0,
+      totalListings: result[0]?.totalListings ?? 0,
+      activeListings: result[0]?.activeListings ?? 0,
     };
   }
 }

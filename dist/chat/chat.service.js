@@ -170,9 +170,20 @@ let ChatService = ChatService_1 = class ChatService {
                     .exec(),
                 this.conversationModel.countDocuments(matchQuery),
             ]);
+            const resolveId = (raw) => {
+                if (!raw)
+                    return '';
+                if (typeof raw === 'string')
+                    return raw;
+                if (raw._id)
+                    return raw._id.toString();
+                if (typeof raw.toString === 'function')
+                    return raw.toString();
+                return '';
+            };
             const formattedConversations = conversations.map(conv => {
-                const currentUserParticipant = conv.participants.find(p => p.userId._id.toString() === userId);
-                const otherParticipant = conv.participants.find(p => p.userId._id.toString() !== userId);
+                const currentUserParticipant = conv.participants.find(p => resolveId(p.userId) === userId);
+                const otherParticipant = conv.participants.find(p => resolveId(p.userId) !== userId);
                 return {
                     ...conv,
                     unreadCount: currentUserParticipant?.unreadCount || 0,

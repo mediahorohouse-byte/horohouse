@@ -15,7 +15,7 @@ export declare class AnalyticsController {
             inquiries: number;
             saves: number;
         }[];
-        granularity: "day" | "week" | "month";
+        granularity: "week" | "day" | "month";
     }>;
     getKPIs(req: any, startDate?: string, endDate?: string): Promise<{
         savedProperties: number;

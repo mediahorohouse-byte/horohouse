@@ -30,6 +30,7 @@ export declare class UnavailableDateRangeDto {
 export declare class CreatePropertyDto {
     title: string;
     price: number;
+    originalPrice?: number;
     currency?: string;
     type: PropertyType;
     listingType: ListingType;
@@ -63,6 +64,8 @@ export declare class CreatePropertyDto {
     serviceFee?: number;
     weeklyDiscountPercent?: number;
     monthlyDiscountPercent?: number;
+    customDiscountNights?: number;
+    customDiscountPercent?: number;
     shortTermAmenities?: ShortTermAmenitiesDto;
     isInstantBookable?: boolean;
     cancellationPolicy?: CancellationPolicy;

@@ -533,7 +533,7 @@ let BookingsService = BookingsService_1 = class BookingsService {
         const cleaningFee = property.cleaningFee ?? 0;
         const serviceFee = Math.round(subtotal * SERVICE_FEE_RATE);
         const taxAmount = 0;
-        const discountAmount = this.computeDiscount(subtotal, nights, property.weeklyDiscountPercent ?? 10, property.monthlyDiscountPercent ?? 15);
+        const discountAmount = this.computeDiscount(subtotal, nights, property.weeklyDiscountPercent ?? 10, property.monthlyDiscountPercent ?? 15, property.customDiscountNights, property.customDiscountPercent);
         const totalAmount = subtotal + cleaningFee + serviceFee + taxAmount - discountAmount;
         return {
             pricePerNight,
@@ -546,12 +546,18 @@ let BookingsService = BookingsService_1 = class BookingsService {
             totalAmount,
         };
     }
-    computeDiscount(subtotal, nights, weeklyPct, monthlyPct) {
-        if (nights >= 28)
-            return Math.round(subtotal * (monthlyPct / 100));
-        if (nights >= 7)
-            return Math.round(subtotal * (weeklyPct / 100));
-        return 0;
+    computeDiscount(subtotal, nights, weeklyPct, monthlyPct, customNights, customPct) {
+        let effectivePct = 0;
+        if (nights >= 28 && monthlyPct > 0) {
+            effectivePct = Math.max(effectivePct, monthlyPct);
+        }
+        if (nights >= 7 && weeklyPct > 0) {
+            effectivePct = Math.max(effectivePct, weeklyPct);
+        }
+        if (customNights && customPct && nights >= customNights && customPct > 0) {
+            effectivePct = Math.max(effectivePct, customPct);
+        }
+        return effectivePct > 0 ? Math.round(subtotal * (effectivePct / 100)) : 0;
     }
     async computeRefund(booking) {
         if (booking.paymentStatus !== booking_schema_1.PaymentStatus.PAID)

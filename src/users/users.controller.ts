@@ -12,6 +12,7 @@ import {
   BadRequestException,
   HttpCode,
   HttpStatus,
+  ForbiddenException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -198,6 +199,13 @@ export class UsersController {
       throw new BadRequestException('role is required in request body');
     }
     return this.usersService.setRole(req.user.id, body.role);
+  }
+
+  @Delete('me/profile-picture')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Remove profile picture' })
+  async removeProfilePicture(@Req() req: any): Promise<User> {
+    return this.usersService.removeProfilePicture(req.user.id);
   }
 
   // ==========================================
@@ -470,9 +478,12 @@ export class UsersController {
   }
 
   @Get('hosts/:id/stats')
-  @ApiOperation({ summary: 'Get live dashboard stats for a host' })
-  @ApiResponse({ status: 200, description: 'Host stats retrieved successfully' })
-  async getHostStats(@Param('id') id: string) {
+  @Roles(UserRole.HOST, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get live dashboard stats for a host (owner or admin)' })
+  async getHostStats(@Param('id') id: string, @Req() req: any) {
+    if (req.user.role !== UserRole.ADMIN && String(req.user.id) !== id) {
+      throw new ForbiddenException('You can only view your own host stats');
+    }
     return this.usersService.getHostStats(id);
   }
 
@@ -482,15 +493,15 @@ export class UsersController {
 
   @Patch('hosts/:id/profile')
   @Roles(UserRole.HOST, UserRole.ADMIN)
-  @ApiOperation({
-    summary: 'Update host profile fields — preferences, house rules, payout accounts, co-hosts, bio',
-  })
-  @ApiResponse({ status: 200, description: 'Host profile updated' })
+  @ApiOperation({ summary: 'Update host profile (owner or admin)' })
   async updateHostProfile(
     @Param('id') id: string,
     @Body() body: UpdateHostProfileDto,
+    @Req() req: any,
   ) {
-    // Note: governmentIdBuffer must come via a dedicated multipart upload endpoint.
+    if (req.user.role !== UserRole.ADMIN && String(req.user.id) !== id) {
+      throw new ForbiddenException('You can only edit your own host profile');
+    }
     return this.usersService.updateHostProfile(id, body);
   }
 
@@ -532,7 +543,7 @@ export class UsersController {
   // GENERIC ADMIN ROUTES — keep at end to avoid shadowing named routes
   // ==========================================
 
-@Get(':id')
+  @Get(':id')
   @Public()
   @ApiOperation({ summary: 'Get public-safe user profile by ID' })
   @ApiResponse({ status: 200, description: 'Public profile found' })

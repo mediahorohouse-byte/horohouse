@@ -152,6 +152,7 @@ export declare class Property {
     _id: Types.ObjectId;
     title: string;
     price: number;
+    originalPrice?: number | null;
     currency?: string;
     type: PropertyType;
     listingType: ListingType;
@@ -177,6 +178,8 @@ export declare class Property {
     serviceFee: number;
     weeklyDiscountPercent: number;
     monthlyDiscountPercent: number;
+    customDiscountNights?: number | null;
+    customDiscountPercent?: number | null;
     unavailableDates: UnavailableDateRange[];
     weekendPrice?: number | null;
     priceOverrides: Record<string, number>;

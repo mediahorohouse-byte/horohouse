@@ -98,6 +98,7 @@ let Property = class Property {
     _id;
     title;
     price;
+    originalPrice;
     currency;
     type;
     listingType;
@@ -120,6 +121,8 @@ let Property = class Property {
     serviceFee;
     weeklyDiscountPercent;
     monthlyDiscountPercent;
+    customDiscountNights;
+    customDiscountPercent;
     unavailableDates;
     weekendPrice;
     priceOverrides;
@@ -179,6 +182,10 @@ __decorate([
     (0, mongoose_1.Prop)({ required: true }),
     __metadata("design:type", Number)
 ], Property.prototype, "price", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: Number, default: null }),
+    __metadata("design:type", Object)
+], Property.prototype, "originalPrice", void 0);
 __decorate([
     (0, mongoose_1.Prop)({ default: 'XAF' }),
     __metadata("design:type", String)
@@ -281,6 +288,14 @@ __decorate([
     (0, mongoose_1.Prop)({ default: 15, min: 0, max: 100 }),
     __metadata("design:type", Number)
 ], Property.prototype, "monthlyDiscountPercent", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: Number, default: null }),
+    __metadata("design:type", Object)
+], Property.prototype, "customDiscountNights", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: Number, default: null }),
+    __metadata("design:type", Object)
+], Property.prototype, "customDiscountPercent", void 0);
 __decorate([
     (0, mongoose_1.Prop)({
         type: [

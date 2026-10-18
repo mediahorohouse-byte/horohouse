@@ -194,6 +194,7 @@ __decorate([
 class CreatePropertyDto {
     title;
     price;
+    originalPrice;
     currency;
     type;
     listingType;
@@ -213,6 +214,8 @@ class CreatePropertyDto {
     serviceFee;
     weeklyDiscountPercent;
     monthlyDiscountPercent;
+    customDiscountNights;
+    customDiscountPercent;
     shortTermAmenities;
     isInstantBookable;
     cancellationPolicy;
@@ -252,6 +255,13 @@ __decorate([
     (0, class_validator_1.Min)(0),
     __metadata("design:type", Number)
 ], CreatePropertyDto.prototype, "price", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ example: 30000, description: 'Original price before price reduction' }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsNumber)(),
+    (0, class_validator_1.Min)(0),
+    __metadata("design:type", Number)
+], CreatePropertyDto.prototype, "originalPrice", void 0);
 __decorate([
     (0, swagger_1.ApiPropertyOptional)({ example: 'XAF' }),
     (0, class_validator_1.IsOptional)(),
@@ -372,6 +382,21 @@ __decorate([
     (0, class_validator_1.Max)(100),
     __metadata("design:type", Number)
 ], CreatePropertyDto.prototype, "monthlyDiscountPercent", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ example: 4, description: 'Minimum number of nights required to qualify for custom stay discount' }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsNumber)(),
+    (0, class_validator_1.Min)(1),
+    __metadata("design:type", Number)
+], CreatePropertyDto.prototype, "customDiscountNights", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ example: 5, description: 'Custom discount percentage applied when stay duration reaches customDiscountNights' }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsNumber)(),
+    (0, class_validator_1.Min)(0),
+    (0, class_validator_1.Max)(100),
+    __metadata("design:type", Number)
+], CreatePropertyDto.prototype, "customDiscountPercent", void 0);
 __decorate([
     (0, swagger_1.ApiPropertyOptional)({ type: ShortTermAmenitiesDto }),
     (0, class_validator_1.IsOptional)(),

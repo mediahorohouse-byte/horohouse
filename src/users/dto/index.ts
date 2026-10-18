@@ -362,6 +362,9 @@ export class UpdateOwnProfileDto extends OmitType(UpdateUserDto, [
   'propertiesListed',
   'propertiesSold',
   'role',
+  'firebaseUid',
+  'googleId',
+  'profilePicture', 
 ] as const) {}
 
 // Update Preferences DTO
