@@ -269,3 +269,15 @@ export class TransactionQueryDto {
   @IsOptional()
   endDate?: string;
 }
+
+export class AdminRefundBookingDto {
+  @ApiPropertyOptional({ description: 'Amount to refund in XAF. Defaults to full refundable or cancellation amount.' })
+  @IsNumber()
+  @IsOptional()
+  amount?: number;
+
+  @ApiPropertyOptional({ description: 'Reason for the refund' })
+  @IsString()
+  @IsOptional()
+  reason?: string;
+}

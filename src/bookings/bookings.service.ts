@@ -5,6 +5,8 @@ import {
   ForbiddenException,
   Logger,
   ConflictException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -14,6 +16,7 @@ import { Property, PropertyDocument, PropertyStatus, ApprovalStatus } from '../p
 import { User, UserDocument, UserRole } from '../users/schemas/user.schema';
 import { RoomsService } from '../rooms/rooms.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PaymentsService } from '../payments/services/payments.service';
 import {
   CreateBookingDto,
   CancelBookingDto,
@@ -72,6 +75,8 @@ export class BookingsService {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     private readonly roomsService: RoomsService,
     private readonly notificationsService: NotificationsService,
+    @Inject(forwardRef(() => PaymentsService))
+    private readonly paymentsService: PaymentsService,
   ) { }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -336,6 +341,27 @@ export class BookingsService {
 
     this.logger.log(`Booking ${bookingId} cancelled by ${cancelledBy}`);
 
+    // ── Trigger refund if applicable ────────────────────────────────────────
+    // Runs AFTER the booking is already CANCELLED in the DB, so the cancellation
+    // itself always succeeds even if the payment provider is temporarily unavailable.
+    if (refundAmount > 0) {
+      try {
+        await this.paymentsService.processBookingRefund(
+          bookingId,
+          refundAmount,
+          dto.reason,
+        );
+      } catch (refundErr: any) {
+        // The booking is already cancelled. The refund failed (e.g. CamerPay error).
+        // The guest's refundStatus is already 'failed' (set by processBookingRefund).
+        // Log for support — do NOT throw; the cancellation response still returns 200.
+        this.logger.error(
+          `cancelBooking: Refund failed for booking ${bookingId}: ${refundErr.message}. ` +
+            `Manual refund required.`,
+        );
+      }
+    }
+
     // ── Notify both parties (in-app + push) ────────────────────────────────
     try {
       const [property, guest, host] = await Promise.all([
@@ -345,6 +371,9 @@ export class BookingsService {
       ]);
       const fmt = (d: Date) => new Date(d).toISOString().split('T')[0];
 
+      // Note: refundAmount is intentionally NOT passed here.
+      // The refund notification is sent inside processBookingRefund()
+      // ONLY after CamerPay confirms the refund — not optimistically.
       await this.notificationsService.notifyBookingCancelled({
         guestId: booking.guestId.toString(),
         hostId: booking.hostId.toString(),
@@ -356,8 +385,8 @@ export class BookingsService {
         checkIn: fmt(booking.checkIn),
         checkOut: fmt(booking.checkOut),
         cancelledByGuest: cancelledBy === CancelledBy.GUEST,
-        refundAmount: refundAmount > 0 ? refundAmount : undefined,
-        currency: booking.currency,
+        // Deliberately omitting refundAmount — the refund notification is
+        // handled separately in processBookingRefund() after CamerPay confirms.
       });
     } catch (notifErr: any) {
       // Non-fatal: the cancellation already succeeded

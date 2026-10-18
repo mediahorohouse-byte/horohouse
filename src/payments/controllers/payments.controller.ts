@@ -14,6 +14,7 @@ import {
   InitializePaymentDto, VerifyPaymentDto,
   TransactionQueryDto,
   InitiateBookingPaymentDto,
+  AdminRefundBookingDto,
 } from '../dto/payment.dto';
 
 @ApiTags('Payments')
@@ -153,4 +154,21 @@ export class PaymentsController {
   async getPaymentAnalytics() {
     return { message: 'Payment analytics endpoint' };
   }
-}
+
+  @Post('admin/bookings/:bookingId/refund')
+  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Process or retry refund for a booking (Admin)',
+    description:
+      'Initiates a refund via CamerPay for a cancelled or disputed booking, records the REFUND transaction, ' +
+      'updates booking payment status, and debits host wallet if applicable.',
+  })
+  @ApiParam({ name: 'bookingId', description: 'ID of the booking to refund' })
+  async adminRefundBooking(
+    @Param('bookingId') bookingId: string,
+    @Body() dto: AdminRefundBookingDto,
+  ) {
+    return this.paymentsService.adminRefundBooking(bookingId, dto.amount, dto.reason);
+  }
+}

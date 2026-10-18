@@ -9,6 +9,7 @@ import { BookingsController } from './bookings.controller';
 import { BookingsScheduler } from './bookings.scheduler';
 import { RoomsModule } from '../rooms/rooms.module';
 import { NotificationsModule } from 'src/notifications/notifications.module';
+import { PaymentsModule } from '../payments/payments.module';
 
 @Module({
   imports: [
@@ -18,8 +19,9 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
       { name: Property.name, schema: PropertySchema },
       { name: User.name, schema: UserSchema },
     ]),
-    forwardRef(() => RoomsModule), 
-    NotificationsModule
+    forwardRef(() => RoomsModule),
+    forwardRef(() => PaymentsModule),
+    NotificationsModule,
   ],
   controllers: [BookingsController],
   providers: [BookingsService, BookingsScheduler],

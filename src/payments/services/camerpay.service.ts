@@ -226,4 +226,78 @@ detectOperatorFromPhone(phone: string): 'orange_money' | 'mtn_momo' {
     this.logger.warn('CamerPay payout not yet implemented');
     return { success: false };
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // POST /api/payment/{uuid}/refund — request a full or partial refund
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Initiates a refund for a completed CamerPay payment.
+   *
+   * @param uuid      The CamerPay transaction UUID (stored in flutterwaveTransactionId).
+   * @param amount    Amount to refund in XAF (must be <= original captured amount).
+   * @param reason    Human-readable reason shown in the CamerPay dashboard.
+   *
+   * TODO: Confirm the exact endpoint path and response shape by:
+   *   1. Checking https://camerpay.biz/pages-docs-legacy under "Refunds".
+   *   2. Running: curl -X POST https://camerpay.biz/api/payment/{uuid}/refund \
+   *        -H "Authorization: Bearer <token>" \
+   *        -H "Content-Type: application/json" \
+   *        -d '{"amount": 5000, "currency": "XAF", "reason": "test"}'
+   *
+   * If CamerPay does NOT support programmatic refunds on this plan,
+   * throw a BadRequestException here and process manually via the dashboard.
+   */
+  async refundPayment(
+    uuid: string,
+    amount: number,
+    reason = 'Booking cancellation refund',
+  ): Promise<{
+    success: boolean;
+    refundId?: string;
+    status: string;
+    _raw?: any;
+  }> {
+    try {
+      this.logger.log(
+        `Initiating CamerPay refund | uuid: ${uuid} | amount: ${amount} XAF | reason: ${reason}`,
+      );
+
+      const body = {
+        amount: Math.round(amount),
+        currency: 'XAF',
+        reason,
+      };
+
+      this.logger.log(`CamerPay refund request body: ${JSON.stringify(body)}`);
+
+      // Endpoint pattern mirrors GET /api/payment/{uuid}/status
+      // Adjust path if CamerPay documentation shows a different route.
+      const response = await this.axiosInstance.post(
+        `/api/payment/${uuid}/refund`,
+        body,
+      );
+
+      const data = response.data;
+      this.logger.log(`CamerPay refund response: ${JSON.stringify(data)}`);
+
+      return {
+        success: true,
+        refundId: data.refund_id ?? data.id ?? undefined,
+        status: data.status ?? 'refunded',
+        _raw: data,
+      };
+    } catch (error: any) {
+      this.logger.error(
+        `CamerPay refundPayment error | uuid: ${uuid} | status: ${error.response?.status} | ` +
+          `data: ${JSON.stringify(error.response?.data)} | message: ${error.message}`,
+      );
+      throw new BadRequestException(
+        error.response?.data?.message ||
+          error.response?.data?.detail ||
+          error.message ||
+          'Failed to initiate refund with CamerPay',
+      );
+    }
+  }
 }

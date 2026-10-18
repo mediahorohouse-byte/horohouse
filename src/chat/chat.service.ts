@@ -345,17 +345,17 @@ export class ChatService implements OnModuleInit {
             }
 
             // Create message
-              const message = await this.messageModel.create({
-    conversationId: new Types.ObjectId(conversationId),
-    senderId: new Types.ObjectId(userId),
-    recipientId: recipient.userId._id,
-    type,
-    content,
-    attachments: attachments || [],   // ← ajouté
-    propertyReference,
-    replyTo: replyTo ? new Types.ObjectId(replyTo) : undefined,
-    status: MessageStatus.SENT,
-  });
+            const message = await this.messageModel.create({
+                conversationId: new Types.ObjectId(conversationId),
+                senderId: new Types.ObjectId(userId),
+                recipientId: recipient.userId._id,
+                type,
+                content,
+                attachments: attachments || [],   // ← ajouté
+                propertyReference,
+                replyTo: replyTo ? new Types.ObjectId(replyTo) : undefined,
+                status: MessageStatus.SENT,
+            });
 
             // Update conversation
             await this.conversationModel.findByIdAndUpdate(conversationId, {

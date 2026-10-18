@@ -401,28 +401,35 @@ async reconcileTransaction(transaction: TransactionDocument): Promise<'success' 
       }
 
       switch (status) {
-        case 'SUCCESSFUL':
+        case 'SUCCESSFUL': {
           if (parseFloat(amount) < transaction.amount) {
             this.logger.warn(
               `Underpayment on tx ${transaction._id}: expected ${transaction.amount}, got ${amount}`,
             );
             return;
           }
-          if (transaction.status === TransactionStatus.SUCCESS) {
+          // ✅ Atomic guard — prevents double-processing on concurrent webhook delivery
+          const confirmed = await this.transactionModel.findOneAndUpdate(
+            { _id: transaction._id, status: { $ne: TransactionStatus.SUCCESS } },
+            {
+              $set: {
+                status: TransactionStatus.SUCCESS,
+                completedAt: new Date(payload.datetime ?? Date.now()),
+                flutterwaveTransactionId: reference,
+                paymentMethod: this.camerPayService.mapPaymentMethod(payload.operator ?? '') as PaymentMethod,
+                paymentProviderResponse: payload,
+              },
+            },
+            { new: true },
+          );
+          if (!confirmed) {
             this.logger.log(`Duplicate webhook — already successful: ${transaction._id}`);
             return;
           }
-          transaction.status = TransactionStatus.SUCCESS;
-          transaction.completedAt = new Date(payload.datetime ?? Date.now());
-          transaction.flutterwaveTransactionId = reference;
-          transaction.paymentMethod = this.camerPayService.mapPaymentMethod(
-            payload.operator ?? '',
-          ) as PaymentMethod;
-          transaction.paymentProviderResponse = payload;
-          await transaction.save();
-          await this.processSuccessfulPayment(transaction);
+          await this.processSuccessfulPayment(confirmed);
           this.logger.log(`Webhook: payment SUCCESSFUL — tx: ${transaction._id}`);
           break;
+        }
 
         case 'FAILED':
           transaction.status = TransactionStatus.FAILED;
@@ -431,6 +438,30 @@ async reconcileTransaction(transaction: TransactionDocument): Promise<'success' 
           await transaction.save();
           this.logger.log(`Webhook: payment FAILED — tx: ${transaction._id}`);
           break;
+
+        case 'REFUNDED': {
+          // Fired when a refund is processed via the CamerPay merchant dashboard
+          // (rather than through the programmatic API). Keeps our records in sync.
+          const alreadyRefunded = transaction.status === TransactionStatus.REFUNDED;
+          if (alreadyRefunded) {
+            this.logger.log(`Duplicate REFUNDED webhook — tx: ${transaction._id}`);
+            return;
+          }
+          transaction.status = TransactionStatus.REFUNDED;
+          transaction.refundedAt = new Date(payload.datetime ?? Date.now());
+          transaction.paymentProviderResponse = payload;
+          await transaction.save();
+
+          // Sync the booking payment status if this transaction is linked to one
+          if (transaction.bookingId) {
+            await this.bookingModel.findByIdAndUpdate(transaction.bookingId, {
+              paymentStatus: PaymentStatus.REFUNDED,
+              'cancellation.refundStatus': 'processed',
+            });
+          }
+          this.logger.log(`Webhook: payment REFUNDED — tx: ${transaction._id}`);
+          break;
+        }
 
         default:
           this.logger.log(`Unhandled CamPay webhook status: ${status}`);
@@ -549,6 +580,231 @@ async reconcileTransaction(transaction: TransactionDocument): Promise<'success' 
         this.logger.log(`No post-payment action for type: ${transaction.type}`);
     }
   }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // processBookingRefund — called by BookingsService.cancelBooking()
+  // ════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Executes a full or partial refund for a cancelled booking.
+   *
+   * Steps:
+   *  1. Load booking + original SUCCESS transaction.
+   *  2. Idempotency guard (skip if already REFUNDED).
+   *  3. Call CamerPay refund API.
+   *  4. Create a REFUND transaction record for the audit trail.
+   *  5. Update booking.paymentStatus (REFUNDED or PARTIAL).
+   *  6. Update booking.cancellation.refundStatus = 'processed'.
+   *  7. Debit host wallet for the portion they received (90% of refundAmount).
+   *  8. Send guest notification.
+   *
+   * On failure: sets refundStatus = 'failed', logs for support, does NOT debit wallet.
+   */
+  async processBookingRefund(
+    bookingId: string,
+    refundAmount: number,
+    reason?: string,
+  ): Promise<void> {
+    this.logger.log(
+      `processBookingRefund | bookingId: ${bookingId} | amount: ${refundAmount} XAF`,
+    );
+
+    // ── 1. Load booking ───────────────────────────────────────────────────────
+    const booking = await this.bookingModel
+      .findById(bookingId)
+      .populate('propertyId', 'title')
+      .exec();
+
+    if (!booking) {
+      this.logger.error(`processBookingRefund: Booking ${bookingId} not found`);
+      return;
+    }
+
+    // ── 2. Idempotency guard ──────────────────────────────────────────────────
+    if (booking.paymentStatus === PaymentStatus.REFUNDED) {
+      this.logger.log(`Booking ${bookingId} already refunded — skipping`);
+      return;
+    }
+
+    // ── 3. Find the original SUCCESS transaction ──────────────────────────────
+    const originalTx = await this.transactionModel.findOne({
+      bookingId: booking._id,
+      status: TransactionStatus.SUCCESS,
+      type: TransactionType.BOOKING,
+    });
+
+    if (!originalTx) {
+      this.logger.error(
+        `processBookingRefund: No SUCCESS transaction found for booking ${bookingId}`,
+      );
+      await this.bookingModel.findByIdAndUpdate(bookingId, {
+        'cancellation.refundStatus': 'failed',
+      });
+      return;
+    }
+
+    const providerUuid = originalTx.flutterwaveTransactionId;
+    if (!providerUuid) {
+      this.logger.error(
+        `processBookingRefund: No CamerPay UUID on transaction ${originalTx._id}`,
+      );
+      await this.bookingModel.findByIdAndUpdate(bookingId, {
+        'cancellation.refundStatus': 'failed',
+      });
+      return;
+    }
+
+    // ── 4. Validate refund amount ─────────────────────────────────────────────
+    const maxRefundable = booking.priceBreakdown.totalAmount;
+    if (refundAmount > maxRefundable) {
+      this.logger.error(
+        `processBookingRefund: refundAmount ${refundAmount} exceeds original payment ` +
+          `${maxRefundable} for booking ${bookingId}`,
+      );
+      await this.bookingModel.findByIdAndUpdate(bookingId, {
+        'cancellation.refundStatus': 'failed',
+      });
+      return;
+    }
+
+    const isFullRefund = refundAmount >= maxRefundable;
+    const currency = (booking.currency ?? 'XAF') as Currency;
+    const propertyTitle = (booking.propertyId as any)?.title ?? 'Property';
+    const refundReason = reason ?? 'Booking cancellation';
+
+    // ── 5. Call CamerPay ──────────────────────────────────────────────────────
+    try {
+      await this.camerPayService.refundPayment(providerUuid, refundAmount, refundReason);
+    } catch (err: any) {
+      this.logger.error(
+        `processBookingRefund: CamerPay refund FAILED for booking ${bookingId}: ${err.message}`,
+      );
+      await this.bookingModel.findByIdAndUpdate(bookingId, {
+        'cancellation.refundStatus': 'failed',
+      });
+      // Re-throw so cancelBooking() can surface the error to the caller
+      throw err;
+    }
+
+    // ── 6. Create REFUND transaction record ───────────────────────────────────
+    const refundTx = new this.transactionModel({
+      userId: booking.guestId,
+      bookingId: booking._id,
+      propertyId: booking.propertyId,
+      amount: refundAmount,
+      currency,
+      type: TransactionType.REFUND,
+      status: TransactionStatus.REFUNDED,
+      paymentMethod: originalTx.paymentMethod,
+      flutterwaveReference: originalTx.flutterwaveReference,
+      refundedAt: new Date(),
+      refundReason,
+      refundTransactionId: originalTx._id as Types.ObjectId,
+      description: `Refund: ${propertyTitle} booking cancellation`,
+      completedAt: new Date(),
+      metadata: {
+        originalTransactionId: originalTx._id.toString(),
+        bookingId,
+        propertyTitle,
+        isFullRefund,
+        originalAmount: maxRefundable,
+        refundAmount,
+      },
+    });
+    await refundTx.save();
+
+    // Mark the original transaction as refunded
+    await this.transactionModel.findByIdAndUpdate(originalTx._id, {
+      status: TransactionStatus.REFUNDED,
+      refundedAt: new Date(),
+      refundReason,
+      refundTransactionId: refundTx._id as Types.ObjectId,
+    });
+
+    // ── 7. Update booking statuses ────────────────────────────────────────────
+    await this.bookingModel.findByIdAndUpdate(bookingId, {
+      paymentStatus: isFullRefund ? PaymentStatus.REFUNDED : PaymentStatus.PARTIAL,
+      'cancellation.refundStatus': 'processed',
+    });
+
+    // ── 8. Debit host wallet (only the portion they were paid = 90%) ──────────
+    const hostPaidPortion = Math.round(refundAmount * (1 - this.BOOKING_PLATFORM_FEE_RATE));
+    try {
+      await this.walletService.debitWallet(
+        booking.hostId.toString(),
+        hostPaidPortion,
+        `Refund deducted: ${propertyTitle} booking cancellation`,
+        originalTx.flutterwaveReference ?? undefined,
+      );
+      this.logger.log(
+        `Host wallet debited: ${booking.hostId} — ${hostPaidPortion} XAF (refund recovery)`,
+      );
+    } catch (walletErr: any) {
+      // Non-fatal: the refund to the guest already succeeded.
+      // Log prominently — an admin must manually recover funds from the host.
+      this.logger.error(
+        `processBookingRefund: Host wallet debit FAILED for booking ${bookingId} ` +
+          `(host: ${booking.hostId}, amount: ${hostPaidPortion} XAF). ` +
+          `Manual recovery required. Error: ${walletErr.message}`,
+      );
+    }
+
+    // ── 9. Notify guest ───────────────────────────────────────────────────────
+    try {
+      await this.notificationsService.notifyRefundProcessed(booking.guestId.toString(), {
+        bookingId,
+        propertyTitle,
+        amount: refundAmount,
+        currency,
+      });
+    } catch (notifErr: any) {
+      this.logger.warn(
+        `processBookingRefund: Notification failed for booking ${bookingId}: ${notifErr.message}`,
+      );
+    }
+
+    this.logger.log(
+      `processBookingRefund DONE | booking: ${bookingId} | refund: ${refundAmount} ${currency} | ` +
+        `host debit: ${hostPaidPortion} ${currency}`,
+    );
+  }
+
+  /**
+   * Admin-initiated refund or retry for a booking.
+   * Allows admins to retry a failed refund or manually issue a full/partial refund.
+   */
+  async adminRefundBooking(
+    bookingId: string,
+    amount?: number,
+    reason?: string,
+  ): Promise<{ success: boolean; message: string; refundAmount: number }> {
+    const booking = await this.bookingModel.findById(bookingId).exec();
+    if (!booking) {
+      throw new NotFoundException(`Booking with ID ${bookingId} not found`);
+    }
+
+    const refundAmount =
+      amount ??
+      booking.cancellation?.refundAmount ??
+      booking.priceBreakdown?.totalAmount;
+
+    if (!refundAmount || refundAmount <= 0) {
+      throw new BadRequestException('Refund amount must be greater than 0');
+    }
+
+    await this.processBookingRefund(
+      bookingId,
+      refundAmount,
+      reason ?? 'Admin initiated refund',
+    );
+
+    return {
+      success: true,
+      message: `Refund of ${refundAmount} ${booking.currency ?? 'XAF'} processed successfully`,
+      refundAmount,
+    };
+  }
+
 
   private async confirmBookingPayment(transaction: TransactionDocument): Promise<void> {
     if (!transaction.bookingId) return;
