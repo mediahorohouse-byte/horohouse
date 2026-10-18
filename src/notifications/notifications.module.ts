@@ -55,6 +55,7 @@ import { EmailModule } from '../email/email.module';                       // ‚Ü
   exports: [
     NotificationsService,
     NotificationsGateway,
+    PushNotificationsService,   // ‚Üê exported so ChatGateway can inject it
   ],
 })
 export class NotificationsModule {}

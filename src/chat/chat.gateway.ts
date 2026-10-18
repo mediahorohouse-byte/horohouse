@@ -17,6 +17,7 @@ import { Model } from 'mongoose';
 import { CallService } from './call.service';
 import { ChatService } from './chat.service';
 import { User, UserDocument } from '../users/schemas/user.schema';
+import { PushNotificationsService } from '../notifications/push-notifications.service';
 import {
   InitiateCallDto,
   AnswerCallDto,
@@ -50,6 +51,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     private readonly chatService: ChatService,
     private readonly callService: CallService,
     private readonly jwtService: JwtService,
+    private readonly pushNotificationsService: PushNotificationsService,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
   ) { }
 
@@ -196,6 +198,40 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
           tempId: data.tempId, // ← KEY FIX: return tempId so frontend replaces optimistic msg
         },
       });
+
+      // ── Push notification for offline / backgrounded recipient ────────────────
+      // Only send if the recipient has no active WebSocket connections, so we
+      // don't double-notify users who are already in the conversation.
+      const recipientId = (message as any).recipientId?.toString?.();
+      if (recipientId && !this.userSockets.has(recipientId)) {
+        const sender = await this.userModel
+          .findById(userId)
+          .select('name')
+          .lean()
+          .catch(() => null);
+
+        const senderName: string = (sender as any)?.name ?? 'Someone';
+        const messageContent: string =
+          data.type === 'image'
+            ? `${senderName} sent you a photo`
+            : data.type === 'audio'
+            ? `${senderName} sent you a voice message`
+            : `${senderName}: ${String(data.content ?? '').slice(0, 100)}`;
+
+        this.pushNotificationsService
+          .sendToUser(recipientId, {
+            title: '💬 New message',
+            body: messageContent,
+            data: {
+              type: 'new_message',
+              conversationId: data.conversationId,
+              route: `/messages/${data.conversationId}`,
+            },
+          })
+          .catch((err: any) =>
+            this.logger.warn(`⚠️ Push notification failed for user ${recipientId}: ${err?.message}`),
+          );
+      }
 
       return { success: true, message };
     } catch (error) {
