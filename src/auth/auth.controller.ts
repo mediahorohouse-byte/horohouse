@@ -341,12 +341,11 @@ export class AuthController {
       this.logger.error(`Google callback failed: ${msg}`, (error as any)?.stack);
       const reason = msg.includes('deactivated') ? 'account_deactivated' : 'oauth_failed';
       // In development, also tell the app why (never in production)
-      const detail = process.env.NODE_ENV !== 'production' ? { detail: msg.slice(0, 200) } : {};
+      const errorParams: Record<string, string> = { error: reason };
+      if (process.env.NODE_ENV !== 'production') errorParams.detail = msg.slice(0, 200);
       const base = target.kind === 'app' && target.url
         ? target.url
         : `${(process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '')}/auth/login`;
-      const errorParams: Record<string, string> = { error: reason };
-      if (process.env.NODE_ENV !== 'production') errorParams.detail = msg.slice(0, 200);
       res.redirect(withParams(base, errorParams), 302);
       return res;
     }

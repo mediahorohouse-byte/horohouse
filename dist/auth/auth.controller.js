@@ -159,13 +159,12 @@ let AuthController = AuthController_1 = class AuthController {
             const msg = String(error?.message || error);
             this.logger.error(`Google callback failed: ${msg}`, error?.stack);
             const reason = msg.includes('deactivated') ? 'account_deactivated' : 'oauth_failed';
-            const detail = process.env.NODE_ENV !== 'production' ? { detail: msg.slice(0, 200) } : {};
-            const base = target.kind === 'app' && target.url
-                ? target.url
-                : `${(process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '')}/auth/login`;
             const errorParams = { error: reason };
             if (process.env.NODE_ENV !== 'production')
                 errorParams.detail = msg.slice(0, 200);
+            const base = target.kind === 'app' && target.url
+                ? target.url
+                : `${(process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '')}/auth/login`;
             res.redirect(withParams(base, errorParams), 302);
             return res;
         }
