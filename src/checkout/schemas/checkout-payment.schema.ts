@@ -7,6 +7,10 @@ export type CheckoutStatus = 'pending' | 'paid' | 'failed' | 'expired';
 
 export const CHECKOUT_STATUSES: CheckoutStatus[] = ['pending', 'paid', 'failed', 'expired'];
 
+/** Admin follow-up of a flagged payment (admin "Payments to review") */
+export type ReviewState = 'open' | 'refunding' | 'resolved';
+export type ReviewResolution = 'refunded_camerpay' | 'refunded_manually' | 'no_refund_needed';
+
 /**
  * One row per payment attempt. A booking can have several attempts
  * (failed → retry), but at most ONE pending attempt at a time (partial unique index).
@@ -89,6 +93,35 @@ export class CheckoutPayment {
   @Prop({ type: String })
   reviewReason?: string;
 
+  // ── Admin follow-up (set from the admin "Payments to review" screen) ──────
+  /** open → refunding (CamerPay call in progress) → resolved */
+  @Prop({ type: String, enum: ['open', 'refunding', 'resolved'] })
+  reviewState?: ReviewState;
+
+  @Prop({ type: String, enum: ['refunded_camerpay', 'refunded_manually', 'no_refund_needed'] })
+  reviewResolution?: ReviewResolution;
+
+  /** Amount given back to the guest (XAF) */
+  @Prop({ type: Number })
+  refundAmount?: number;
+
+  @Prop({ type: String })
+  reviewNote?: string;
+
+  /** Who handled it (audit trail) */
+  @Prop({ type: Types.ObjectId })
+  reviewedBy?: Types.ObjectId;
+
+  @Prop({ type: String })
+  reviewedByName?: string;
+
+  @Prop({ type: Date })
+  reviewedAt?: Date;
+
+  /** Last error from a refund attempt through CamerPay */
+  @Prop({ type: String })
+  reviewError?: string;
+
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -98,6 +131,7 @@ export const CheckoutPaymentSchema = SchemaFactory.createForClass(CheckoutPaymen
 
 CheckoutPaymentSchema.index({ providerReference: 1 }, { unique: true, sparse: true });
 CheckoutPaymentSchema.index({ status: 1, expiresAt: 1 });
+CheckoutPaymentSchema.index({ reviewState: 1, reviewedAt: -1 }, { sparse: true });
 // At most one pending attempt per booking — protects against double taps / two devices.
 CheckoutPaymentSchema.index(
   { bookingId: 1 },

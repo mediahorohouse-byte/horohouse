@@ -52,6 +52,7 @@ const share_module_1 = require("./share/share.module");
 const trust_module_1 = require("./trust/trust.module");
 const host_messages_module_1 = require("./host-messages/host-messages.module");
 const wishlists_module_1 = require("./wishlists/wishlists.module");
+const admin_review_module_1 = require("./admin-review/admin-review.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -129,6 +130,7 @@ exports.AppModule = AppModule = __decorate([
             trust_module_1.TrustModule,
             host_messages_module_1.HostMessagesModule,
             wishlists_module_1.WishlistsModule,
+            admin_review_module_1.AdminReviewModule,
         ],
         controllers: [app_controller_1.AppController],
         providers: [

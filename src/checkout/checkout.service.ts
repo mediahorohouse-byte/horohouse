@@ -364,9 +364,11 @@ export class CheckoutService {
   private async flag(payment: CheckoutPaymentDocument, reason: string) {
     this.logger.error(`Payment ${payment.id} needs review: ${reason}`);
     // Alert once, when the payment is first flagged (webhooks retry).
+    // Once an admin has resolved it (refunded, or no refund needed), a late
+    // webhook retry must not put it back in the review list.
     const res = await this.payments.updateOne(
-      { _id: payment._id, needsReview: { $ne: true } },
-      { $set: { needsReview: true, reviewReason: reason } },
+      { _id: payment._id, needsReview: { $ne: true }, reviewState: { $ne: 'resolved' } },
+      { $set: { needsReview: true, reviewReason: reason, reviewState: 'open' } },
     );
     if (res.modifiedCount > 0) {
       const amount = `${Math.round(payment.amount).toLocaleString('fr-FR')} XAF`;

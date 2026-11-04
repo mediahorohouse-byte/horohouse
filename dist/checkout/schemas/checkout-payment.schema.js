@@ -38,6 +38,14 @@ let CheckoutPayment = class CheckoutPayment {
     failureReason;
     needsReview;
     reviewReason;
+    reviewState;
+    reviewResolution;
+    refundAmount;
+    reviewNote;
+    reviewedBy;
+    reviewedByName;
+    reviewedAt;
+    reviewError;
     createdAt;
     updatedAt;
 };
@@ -138,11 +146,44 @@ __decorate([
     (0, mongoose_1.Prop)({ type: String }),
     __metadata("design:type", String)
 ], CheckoutPayment.prototype, "reviewReason", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: String, enum: ['open', 'refunding', 'resolved'] }),
+    __metadata("design:type", String)
+], CheckoutPayment.prototype, "reviewState", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: String, enum: ['refunded_camerpay', 'refunded_manually', 'no_refund_needed'] }),
+    __metadata("design:type", String)
+], CheckoutPayment.prototype, "reviewResolution", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: Number }),
+    __metadata("design:type", Number)
+], CheckoutPayment.prototype, "refundAmount", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: String }),
+    __metadata("design:type", String)
+], CheckoutPayment.prototype, "reviewNote", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: mongoose_2.Types.ObjectId }),
+    __metadata("design:type", mongoose_2.Types.ObjectId)
+], CheckoutPayment.prototype, "reviewedBy", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: String }),
+    __metadata("design:type", String)
+], CheckoutPayment.prototype, "reviewedByName", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: Date }),
+    __metadata("design:type", Date)
+], CheckoutPayment.prototype, "reviewedAt", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: String }),
+    __metadata("design:type", String)
+], CheckoutPayment.prototype, "reviewError", void 0);
 exports.CheckoutPayment = CheckoutPayment = __decorate([
     (0, mongoose_1.Schema)({ collection: 'checkout_payments', timestamps: true })
 ], CheckoutPayment);
 exports.CheckoutPaymentSchema = mongoose_1.SchemaFactory.createForClass(CheckoutPayment);
 exports.CheckoutPaymentSchema.index({ providerReference: 1 }, { unique: true, sparse: true });
 exports.CheckoutPaymentSchema.index({ status: 1, expiresAt: 1 });
+exports.CheckoutPaymentSchema.index({ reviewState: 1, reviewedAt: -1 }, { sparse: true });
 exports.CheckoutPaymentSchema.index({ bookingId: 1 }, { unique: true, partialFilterExpression: { status: 'pending' }, name: 'one_pending_per_booking' });
 //# sourceMappingURL=checkout-payment.schema.js.map

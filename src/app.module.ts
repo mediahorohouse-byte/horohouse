@@ -46,6 +46,7 @@ import { ShareModule } from './share/share.module';
 import { TrustModule } from './trust/trust.module';
 import { HostMessagesModule } from './host-messages/host-messages.module';
 import { WishlistsModule } from './wishlists/wishlists.module';
+import { AdminReviewModule } from './admin-review/admin-review.module';
 
 @Module({
   imports: [
@@ -128,6 +129,7 @@ import { WishlistsModule } from './wishlists/wishlists.module';
     TrustModule,
     HostMessagesModule,
     WishlistsModule,
+    AdminReviewModule,
   ],
 
   controllers: [AppController],

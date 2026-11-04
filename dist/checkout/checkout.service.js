@@ -267,7 +267,7 @@ let CheckoutService = CheckoutService_1 = class CheckoutService {
     }
     async flag(payment, reason) {
         this.logger.error(`Payment ${payment.id} needs review: ${reason}`);
-        const res = await this.payments.updateOne({ _id: payment._id, needsReview: { $ne: true } }, { $set: { needsReview: true, reviewReason: reason } });
+        const res = await this.payments.updateOne({ _id: payment._id, needsReview: { $ne: true }, reviewState: { $ne: 'resolved' } }, { $set: { needsReview: true, reviewReason: reason, reviewState: 'open' } });
         if (res.modifiedCount > 0) {
             const amount = `${Math.round(payment.amount).toLocaleString('fr-FR')} XAF`;
             await this.notifications?.notifyAdmins({

@@ -3,6 +3,8 @@ export type CheckoutMethod = 'mobile_money' | 'card';
 export type MomoOperator = 'orange_money' | 'mtn_momo';
 export type CheckoutStatus = 'pending' | 'paid' | 'failed' | 'expired';
 export declare const CHECKOUT_STATUSES: CheckoutStatus[];
+export type ReviewState = 'open' | 'refunding' | 'resolved';
+export type ReviewResolution = 'refunded_camerpay' | 'refunded_manually' | 'no_refund_needed';
 export declare class CheckoutPayment {
     bookingId: Types.ObjectId;
     userId: Types.ObjectId;
@@ -28,6 +30,14 @@ export declare class CheckoutPayment {
     failureReason?: string;
     needsReview: boolean;
     reviewReason?: string;
+    reviewState?: ReviewState;
+    reviewResolution?: ReviewResolution;
+    refundAmount?: number;
+    reviewNote?: string;
+    reviewedBy?: Types.ObjectId;
+    reviewedByName?: string;
+    reviewedAt?: Date;
+    reviewError?: string;
     createdAt?: Date;
     updatedAt?: Date;
 }
