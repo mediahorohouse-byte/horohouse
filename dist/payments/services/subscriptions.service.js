@@ -472,6 +472,14 @@ let SubscriptionsService = SubscriptionsService_1 = class SubscriptionsService {
             if (transaction.type !== transaction_schema_1.TransactionType.SUBSCRIPTION) {
                 throw new common_1.BadRequestException('Transaction is not for subscription');
             }
+            if (transaction.status !== transaction_schema_1.TransactionStatus.SUCCESS) {
+                throw new common_1.BadRequestException('Payment not completed');
+            }
+            if (transaction.subscriptionId) {
+                const done = await this.subscriptionModel.findById(transaction.subscriptionId).exec();
+                if (done)
+                    return done;
+            }
             const planName = transaction.metadata?.planName;
             const billingCycle = transaction.metadata?.billingCycle;
             if (!planName || !billingCycle) {
@@ -480,6 +488,11 @@ let SubscriptionsService = SubscriptionsService_1 = class SubscriptionsService {
             const plan = await this.subscriptionPlanModel.findOne({ name: planName });
             if (!plan) {
                 throw new common_1.NotFoundException('Subscription plan not found');
+            }
+            const planPrice = Number(plan.pricing?.[billingCycle] ?? 0);
+            if (!(planPrice > 0) || transaction.amount < planPrice) {
+                this.logger.error(`Subscription ${planName}/${billingCycle} paid ${transaction.amount} but costs ${planPrice} (tx ${transactionId})`);
+                throw new common_1.BadRequestException('Amount paid does not match the plan price');
             }
             const startDate = new Date();
             const endDate = this.calculateEndDate(startDate, billingCycle);

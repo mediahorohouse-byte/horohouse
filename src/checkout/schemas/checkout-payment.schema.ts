@@ -1,7 +1,27 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 
-export type CheckoutMethod = 'mobile_money' | 'card';
+/** wallet = HoroHouse wallet balance; plan_credit = a free boost included in the host's plan */
+export type CheckoutMethod = 'mobile_money' | 'card' | 'wallet' | 'plan_credit';
+export const CHECKOUT_METHODS: CheckoutMethod[] = ['mobile_money', 'card', 'wallet', 'plan_credit'];
+/** What the payment is for */
+export type CheckoutPurpose = 'booking' | 'subscription' | 'boost';
+
+/** Subscription / boost details, fixed when the payment starts (price never comes from the app) */
+export interface CheckoutPurchase {
+  label?: string;
+  planName?: string;
+  billingCycle?: 'monthly' | 'quarterly' | 'yearly';
+  propertyId?: string;
+  propertyTitle?: string;
+  boostType?: string;
+  duration?: number; // hours
+  /** Set during fulfilment, so a retry never activates twice */
+  transactionId?: string;
+  subscriptionId?: string;
+  boostId?: string;
+  endsAt?: Date;
+}
 export type MomoOperator = 'orange_money' | 'mtn_momo';
 export type CheckoutStatus = 'pending' | 'paid' | 'failed' | 'expired';
 
@@ -23,13 +43,25 @@ export type ReviewResolution = 'refunded_camerpay' | 'refunded_manually' | 'no_r
  */
 @Schema({ collection: 'checkout_payments', timestamps: true })
 export class CheckoutPayment {
-  @Prop({ type: Types.ObjectId, required: true, index: true })
-  bookingId!: Types.ObjectId;
+  @Prop({ type: String, enum: ['booking', 'subscription', 'boost'], default: 'booking', index: true })
+  purpose!: CheckoutPurpose;
+
+  /** Bookings only */
+  @Prop({ type: Types.ObjectId, index: true })
+  bookingId?: Types.ObjectId;
+
+  /** Subscriptions / boosts only */
+  @Prop({ type: Object })
+  purchase?: CheckoutPurchase;
+
+  /** One pending attempt per thing being bought: "sub:<userId>" or "boost:<propertyId>" */
+  @Prop({ type: String })
+  purchaseKey?: string;
 
   @Prop({ type: Types.ObjectId, required: true, index: true })
   userId!: Types.ObjectId;
 
-  @Prop({ type: String, enum: ['mobile_money', 'card'], required: true })
+  @Prop({ type: String, enum: CHECKOUT_METHODS, required: true })
   method!: CheckoutMethod;
 
   /** Mobile Money only. */
@@ -41,7 +73,8 @@ export class CheckoutPayment {
   phone?: string;
 
   /** Always computed server-side from the booking, never trusted from the client. */
-  @Prop({ type: Number, required: true, min: 1 })
+  /** 0 only for a free boost included in the plan */
+  @Prop({ type: Number, required: true, min: 0 })
   amount!: number;
 
   @Prop({ type: String, enum: ['XAF'], default: 'XAF' })
@@ -133,7 +166,22 @@ CheckoutPaymentSchema.index({ providerReference: 1 }, { unique: true, sparse: tr
 CheckoutPaymentSchema.index({ status: 1, expiresAt: 1 });
 CheckoutPaymentSchema.index({ reviewState: 1, reviewedAt: -1 }, { sparse: true });
 // At most one pending attempt per booking — protects against double taps / two devices.
+// (v2: only rows that have a bookingId; the old index treated every purchase as the
+// same "null" booking. CheckoutService drops the old one at startup.)
 CheckoutPaymentSchema.index(
   { bookingId: 1 },
-  { unique: true, partialFilterExpression: { status: 'pending' }, name: 'one_pending_per_booking' },
+  {
+    unique: true,
+    partialFilterExpression: { status: 'pending', bookingId: { $exists: true } },
+    name: 'one_pending_per_booking_v2',
+  },
+);
+// Same for subscriptions / boosts
+CheckoutPaymentSchema.index(
+  { purchaseKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: 'pending', purchaseKey: { $exists: true } },
+    name: 'one_pending_per_purchase',
+  },
 );

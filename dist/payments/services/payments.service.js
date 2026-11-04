@@ -56,6 +56,9 @@ let PaymentsService = PaymentsService_1 = class PaymentsService {
     async initializePayment(dto, user) {
         try {
             this.logger.log(`Initializing payment for user ${user._id}: ${JSON.stringify(dto)}`);
+            if (dto.type === transaction_schema_1.TransactionType.BOOST_LISTING) {
+                throw new common_1.BadRequestException('Please update the app to boost a listing.');
+            }
             const txRef = this.generateTransactionReference(dto.type);
             const { platformFee, paymentProcessingFee, netAmount } = this.calculateFees(dto.amount, dto.paymentMethod);
             const transaction = new this.transactionModel({

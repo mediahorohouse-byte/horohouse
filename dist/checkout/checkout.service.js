@@ -20,6 +20,7 @@ const mongoose_1 = require("@nestjs/mongoose");
 const mongoose_2 = require("mongoose");
 const booking_payment_gateway_1 = require("./booking-payment.gateway");
 const camerpay_client_1 = require("./camerpay.client");
+const purchase_gateway_1 = require("./purchase.gateway");
 const momo_util_1 = require("./momo.util");
 const checkout_payment_schema_1 = require("./schemas/checkout-payment.schema");
 const notifications_service_1 = require("../notifications/notifications.service");
@@ -31,6 +32,7 @@ let CheckoutService = CheckoutService_1 = class CheckoutService {
     payments;
     camerpay;
     bookings;
+    purchases;
     notifications;
     logger = new common_1.Logger(CheckoutService_1.name);
     publicApiUrl;
@@ -39,10 +41,11 @@ let CheckoutService = CheckoutService_1 = class CheckoutService {
     returnSchemes;
     frontendUrl;
     defaultAppReturn;
-    constructor(payments, camerpay, bookings, config, notifications) {
+    constructor(payments, camerpay, bookings, purchases, config, notifications) {
         this.payments = payments;
         this.camerpay = camerpay;
         this.bookings = bookings;
+        this.purchases = purchases;
         this.notifications = notifications;
         this.publicApiUrl = (config.get('CHECKOUT_PUBLIC_API_URL') ?? config.get('BACKEND_URL') ?? '').replace(/\/+$/, '');
         if (!this.publicApiUrl.startsWith('https://')) {
@@ -55,38 +58,60 @@ let CheckoutService = CheckoutService_1 = class CheckoutService {
         this.frontendUrl = config.get('FRONTEND_URL')?.replace(/\/+$/, '');
         this.defaultAppReturn = config.get('CHECKOUT_DEFAULT_APP_RETURN') ?? 'horohouse://payment/return';
     }
-    async createPayment(userId, dto) {
-        const booking = await this.bookings.getPayableBooking(dto.bookingId, userId);
-        let phone;
+    async onModuleInit() {
+        try {
+            await this.payments.collection.dropIndex('one_pending_per_booking');
+            this.logger.log('Dropped old index one_pending_per_booking (replaced by one_pending_per_booking_v2)');
+        }
+        catch {
+        }
+    }
+    async quote(userId, dto) {
+        return this.purchases.quoteView(userId, { ...dto, duration: dto.duration != null ? Number(dto.duration) : undefined });
+    }
+    resolveMomo(dto) {
+        if (dto.method !== 'mobile_money')
+            return {};
         let operator = dto.operator;
-        if (dto.method === 'mobile_money') {
-            const local = (0, momo_util_1.normalizeCmPhone)(dto.phone);
-            if (!local)
-                throw new common_1.UnprocessableEntityException({ code: 'INVALID_PHONE', message: 'Numéro Mobile Money invalide.' });
-            const detected = (0, momo_util_1.detectOperator)(local);
-            if (detected && operator && detected !== operator) {
-                throw new common_1.UnprocessableEntityException({
-                    code: 'OPERATOR_MISMATCH',
-                    message: 'Ce numéro ne correspond pas à l’opérateur choisi.',
-                });
-            }
-            operator = operator ?? detected ?? undefined;
-            if (!operator)
-                throw new common_1.UnprocessableEntityException({ code: 'OPERATOR_REQUIRED', message: 'Choisissez votre opérateur.' });
-            phone = local;
+        const local = (0, momo_util_1.normalizeCmPhone)(dto.phone);
+        if (!local)
+            throw new common_1.UnprocessableEntityException({ code: 'INVALID_PHONE', message: 'Numéro Mobile Money invalide.' });
+        const detected = (0, momo_util_1.detectOperator)(local);
+        if (detected && operator && detected !== operator) {
+            throw new common_1.UnprocessableEntityException({
+                code: 'OPERATOR_MISMATCH',
+                message: 'Ce numéro ne correspond pas à l’opérateur choisi.',
+            });
         }
-        else {
-            operator = undefined;
-        }
-        const limits = LIMITS[dto.method];
-        if (booking.amount < limits.min || booking.amount > limits.max) {
+        operator = operator ?? detected ?? undefined;
+        if (!operator)
+            throw new common_1.UnprocessableEntityException({ code: 'OPERATOR_REQUIRED', message: 'Choisissez votre opérateur.' });
+        return { phone: local, operator };
+    }
+    checkLimits(method, amount) {
+        const limits = LIMITS[method];
+        if (amount < limits.min || amount > limits.max) {
             throw new common_1.UnprocessableEntityException({
                 code: 'AMOUNT_OUT_OF_RANGE',
-                message: dto.method === 'card'
+                message: method === 'card'
                     ? `Le paiement par carte est possible de ${limits.min} à ${limits.max.toLocaleString('fr-FR')} XAF.`
                     : `Mobile Money accepte de ${limits.min} à ${limits.max.toLocaleString('fr-FR')} XAF.`,
             });
         }
+    }
+    async createPayment(userId, dto) {
+        const purpose = dto.purpose ?? 'booking';
+        if (purpose !== 'booking')
+            return this.createPurchasePayment(userId, dto, purpose);
+        if (dto.method === 'wallet' || dto.method === 'plan_credit') {
+            throw new common_1.BadRequestException({ code: 'METHOD_NOT_ALLOWED', message: 'Ce moyen de paiement n’est pas disponible pour une réservation.' });
+        }
+        if (!dto.bookingId)
+            throw new common_1.BadRequestException('bookingId requis');
+        const booking = await this.bookings.getPayableBooking(dto.bookingId, userId);
+        const { phone, operator } = this.resolveMomo(dto);
+        const method = dto.method;
+        this.checkLimits(method, booking.amount);
         const appReturnUrl = this.validateReturnUrl(dto.returnUrl);
         const bookingObjectId = new mongoose_2.Types.ObjectId(booking.id);
         const open = await this.payments.findOne({ bookingId: bookingObjectId, status: 'pending' });
@@ -122,7 +147,7 @@ let CheckoutService = CheckoutService_1 = class CheckoutService {
                 status: 'pending',
                 merchantInvoiceId: `HH-${_id.toHexString()}`,
                 appReturnUrl,
-                expiresAt: this.computeExpiry(dto.method, booking.expiresAt),
+                expiresAt: this.computeExpiry(method, booking.expiresAt),
             });
         }
         catch (err) {
@@ -160,6 +185,136 @@ let CheckoutService = CheckoutService_1 = class CheckoutService {
             await this.payments.updateOne({ _id: payment._id, status: 'pending' }, { $set: { status: 'failed', failedAt: new Date(), failureReason: reason } });
             throw this.toHttpError(err, dto.method === 'mobile_money' ? operator : undefined);
         }
+    }
+    async createPurchasePayment(userId, dto, purpose) {
+        const q = await this.purchases.quote(userId, {
+            purpose: purpose,
+            planName: dto.planName,
+            billingCycle: dto.billingCycle,
+            propertyId: dto.propertyId,
+            boostType: dto.boostType,
+            duration: dto.duration != null ? Number(dto.duration) : undefined,
+        });
+        if (dto.method === 'wallet' || dto.method === 'plan_credit')
+            return this.payInstantly(userId, dto, purpose, q);
+        const method = dto.method;
+        const { phone, operator } = this.resolveMomo(dto);
+        this.checkLimits(method, q.amount);
+        const appReturnUrl = this.validateReturnUrl(dto.returnUrl);
+        const open = await this.payments.findOne({ purchaseKey: q.key, status: 'pending' });
+        if (open) {
+            const same = String(open.userId) === String(userId) &&
+                open.method === method &&
+                open.operator === operator &&
+                open.phone === phone &&
+                open.amount === q.amount &&
+                this.samePurchase(open.purchase, q.purchase) &&
+                open.providerReference &&
+                open.expiresAt.getTime() > Date.now() + 60_000;
+            if (same)
+                return this.toView(open);
+            await this.payments.updateOne({ _id: open._id, status: 'pending' }, { $set: { status: 'failed', failedAt: new Date(), failureReason: 'superseded' } });
+        }
+        const _id = new mongoose_2.Types.ObjectId();
+        let payment;
+        try {
+            payment = await this.payments.create({
+                _id,
+                purpose,
+                purchase: q.purchase,
+                purchaseKey: q.key,
+                userId: new mongoose_2.Types.ObjectId(userId),
+                method,
+                operator,
+                phone,
+                amount: q.amount,
+                currency: 'XAF',
+                status: 'pending',
+                merchantInvoiceId: `HH-${_id.toHexString()}`,
+                appReturnUrl,
+                expiresAt: this.computeExpiry(method),
+            });
+        }
+        catch (err) {
+            if (err?.code === 11000) {
+                throw new common_1.ConflictException({ code: 'PAYMENT_IN_PROGRESS', message: 'Un paiement est déjà en cours pour cet achat.' });
+            }
+            throw err;
+        }
+        try {
+            const res = await this.camerpay.initiate({
+                amount: payment.amount,
+                paymentMethod: method === 'card' ? 'stripe' : operator,
+                merchantInvoiceId: payment.merchantInvoiceId,
+                callbackUrl: `${this.publicApiUrl}/checkout/webhooks/camerpay`,
+                returnUrl: `${this.publicApiUrl}/checkout/return?paymentId=${payment.id}`,
+                idempotencyKey: payment.id,
+                customerPhone: phone ? (0, momo_util_1.toInternational)(phone) : q.customerPhone ? (0, momo_util_1.toInternational)(q.customerPhone) : undefined,
+                customerName: q.customerName,
+            });
+            payment.providerReference = res.uuid;
+            payment.providerStatus = res.status;
+            payment.payUrl = res.payUrl;
+            await payment.save();
+            return this.toView(payment);
+        }
+        catch (err) {
+            const reason = err instanceof camerpay_client_1.CamerPayError ? `initiate_${err.kind}` : 'initiate_error';
+            await this.payments.updateOne({ _id: payment._id, status: 'pending' }, { $set: { status: 'failed', failedAt: new Date(), failureReason: reason } });
+            throw this.toHttpError(err, method === 'mobile_money' ? operator : undefined);
+        }
+    }
+    async payInstantly(userId, dto, purpose, q) {
+        const method = dto.method;
+        if (method === 'plan_credit' && purpose !== 'boost') {
+            throw new common_1.BadRequestException({ code: 'METHOD_NOT_ALLOWED', message: 'Les boosts inclus ne servent qu’aux boosts.' });
+        }
+        const amount = method === 'plan_credit' ? 0 : q.amount;
+        if (method === 'wallet' && !(amount > 0))
+            throw new common_1.BadRequestException('Montant invalide');
+        const _id = new mongoose_2.Types.ObjectId();
+        let payment;
+        try {
+            payment = await this.payments.create({
+                _id,
+                purpose,
+                purchase: q.purchase,
+                purchaseKey: q.key,
+                userId: new mongoose_2.Types.ObjectId(userId),
+                method,
+                amount,
+                currency: 'XAF',
+                status: 'pending',
+                merchantInvoiceId: `HH-${_id.toHexString()}`,
+                expiresAt: new Date(Date.now() + 5 * 60_000),
+            });
+        }
+        catch (err) {
+            if (err?.code === 11000) {
+                throw new common_1.ConflictException({ code: 'PAYMENT_IN_PROGRESS', message: 'Un paiement est déjà en cours pour cet achat.' });
+            }
+            throw err;
+        }
+        const label = q.purchase.label ?? purpose;
+        try {
+            if (method === 'wallet') {
+                await this.purchases.chargeWallet(userId, amount, label, payment.merchantInvoiceId);
+            }
+            else if (!(await this.purchases.usePlanBoost(userId))) {
+                throw new common_1.UnprocessableEntityException({ code: 'NO_PLAN_BOOST', message: 'Vous n’avez plus de boost inclus ce mois-ci.' });
+            }
+        }
+        catch (err) {
+            await this.payments.updateOne({ _id: payment._id, status: 'pending' }, { $set: { status: 'failed', failedAt: new Date(), failureReason: method === 'wallet' ? 'wallet_declined' : 'no_plan_boost' } });
+            throw err;
+        }
+        await this.payments.updateOne({ _id: payment._id }, { $set: { status: 'paid', paidAt: new Date(), providerStatus: method } });
+        await this.fulfil(payment);
+        return this.toView((await this.payments.findById(payment._id)));
+    }
+    samePurchase(a, b) {
+        const k = (p) => [p?.planName, p?.billingCycle, p?.propertyId, p?.boostType, p?.duration].join('|');
+        return k(a) === k(b);
     }
     async getPayment(userId, paymentId) {
         return this.toView(await this.findOwned(userId, paymentId));
@@ -242,6 +397,8 @@ let CheckoutService = CheckoutService_1 = class CheckoutService {
         }, { $set: { fulfillingAt: new Date() } }, { new: true });
         if (!claimed)
             return;
+        if (claimed.purpose && claimed.purpose !== 'booking')
+            return this.fulfilPurchase(claimed);
         let result;
         try {
             result = await this.bookings.markPaid(claimed);
@@ -259,6 +416,41 @@ let CheckoutService = CheckoutService_1 = class CheckoutService {
         await this.payments.updateOne({ _id: claimed._id }, { $set: { fulfilledAt: new Date() }, $unset: { fulfillingAt: 1 } });
         this.logger.log(`Payment ${claimed.id} paid → booking ${claimed.bookingId}: ${result}`);
     }
+    async fulfilPurchase(claimed) {
+        const instant = claimed.method === 'wallet' || claimed.method === 'plan_credit';
+        const save = async (purchase) => {
+            await this.payments.updateOne({ _id: claimed._id }, { $set: { purchase } });
+        };
+        let outcome;
+        try {
+            outcome = await this.purchases.activate(claimed, save);
+        }
+        catch (err) {
+            if (!instant) {
+                await this.payments.updateOne({ _id: claimed._id }, { $unset: { fulfillingAt: 1 } });
+                throw err;
+            }
+            outcome = { result: 'not_possible', purchase: claimed.purchase ?? {}, reason: String(err?.message ?? err) };
+        }
+        if (outcome.result === 'not_possible') {
+            if (instant) {
+                const label = outcome.purchase.label ?? claimed.purpose;
+                if (claimed.method === 'wallet')
+                    await this.purchases.refundWallet(String(claimed.userId), claimed.amount, label, claimed.merchantInvoiceId);
+                else
+                    await this.purchases.releasePlanBoost(String(claimed.userId));
+                await this.payments.updateOne({ _id: claimed._id }, {
+                    $set: { status: 'failed', failedAt: new Date(), failureReason: 'not_activated_refunded', refundedAt: new Date(), purchase: outcome.purchase },
+                    $unset: { fulfillingAt: 1 },
+                });
+                this.logger.warn(`Instant ${claimed.purpose} ${claimed.id} could not be activated (${outcome.reason}); refunded`);
+                return;
+            }
+            await this.flag(claimed, `paid_but_${claimed.purpose}_not_activated: ${outcome.reason} — refund the customer`);
+        }
+        await this.payments.updateOne({ _id: claimed._id }, { $set: { fulfilledAt: new Date(), purchase: outcome.purchase }, $unset: { fulfillingAt: 1 } });
+        this.logger.log(`Payment ${claimed.id} paid → ${claimed.purpose}: ${outcome.result}`);
+    }
     computeExpiry(method, bookingDeadline) {
         const ttl = Date.now() + (method === 'mobile_money' ? this.momoTtlMs : this.cardTtlMs);
         if (!bookingDeadline)
@@ -272,8 +464,13 @@ let CheckoutService = CheckoutService_1 = class CheckoutService {
             const amount = `${Math.round(payment.amount).toLocaleString('fr-FR')} XAF`;
             await this.notifications?.notifyAdmins({
                 title: 'Payment needs review',
-                message: `${amount} for booking ${payment.bookingId} (${payment.method}${payment.operator ? ` · ${payment.operator}` : ''}): ${reason}. Check it in CamerPay and refund the guest if needed.`,
-                metadata: { paymentId: payment.id, bookingId: String(payment.bookingId), reason, amount: payment.amount },
+                message: `${amount} for ${payment.bookingId ? `booking ${payment.bookingId}` : `${payment.purpose} "${payment.purchase?.label ?? ''}"`} (${payment.method}${payment.operator ? ` · ${payment.operator}` : ''}): ${reason}. Check it in CamerPay and refund the customer if needed.`,
+                metadata: {
+                    paymentId: payment.id,
+                    ...(payment.bookingId ? { bookingId: String(payment.bookingId) } : { purpose: payment.purpose }),
+                    reason,
+                    amount: payment.amount,
+                },
             });
         }
     }
@@ -337,9 +534,23 @@ let CheckoutService = CheckoutService_1 = class CheckoutService {
     }
     toView(p) {
         const doc = p;
+        const pu = doc.purchase;
         return {
             id: String(doc._id),
-            bookingId: String(doc.bookingId),
+            purpose: doc.purpose ?? 'booking',
+            bookingId: doc.bookingId ? String(doc.bookingId) : undefined,
+            purchase: pu
+                ? {
+                    label: pu.label,
+                    planName: pu.planName,
+                    billingCycle: pu.billingCycle,
+                    propertyId: pu.propertyId,
+                    propertyTitle: pu.propertyTitle,
+                    boostType: pu.boostType,
+                    duration: pu.duration,
+                    endsAt: pu.endsAt ? new Date(pu.endsAt).toISOString() : undefined,
+                }
+                : undefined,
             method: doc.method,
             operator: doc.operator,
             phoneMasked: doc.phone ? `6 •• •• ${doc.phone.slice(5, 7)} ${doc.phone.slice(7, 9)}` : undefined,
@@ -389,10 +600,11 @@ exports.CheckoutService = CheckoutService;
 exports.CheckoutService = CheckoutService = CheckoutService_1 = __decorate([
     (0, common_1.Injectable)(),
     __param(0, (0, mongoose_1.InjectModel)(checkout_payment_schema_1.CheckoutPayment.name)),
-    __param(4, (0, common_1.Optional)()),
+    __param(5, (0, common_1.Optional)()),
     __metadata("design:paramtypes", [mongoose_2.Model,
         camerpay_client_1.CamerPayClient,
         booking_payment_gateway_1.BookingPaymentGateway,
+        purchase_gateway_1.PurchaseGateway,
         config_1.ConfigService,
         notifications_service_1.NotificationsService])
 ], CheckoutService);

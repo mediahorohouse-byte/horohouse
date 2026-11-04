@@ -18,7 +18,7 @@ import type { FastifyRequest } from 'fastify';
 // ⚠ Adjust to your existing guard path.
 import { JwtAuthGuard } from 'src/auth/guards/jwt.auth.guard';
 import { CheckoutService } from './checkout.service';
-import { CreateCheckoutPaymentDto } from './dto/create-checkout-payment.dto';
+import { CheckoutQuoteQueryDto, CreateCheckoutPaymentDto } from './dto/create-checkout-payment.dto';
 
 const userIdOf = (req: any): string => String(req.user?.id ?? req.user?._id ?? req.user?.sub ?? req.user?.userId);
 
@@ -30,7 +30,19 @@ export class CheckoutController {
     this.signatureHeader = (config.get<string>('CAMERPAY_SIGNATURE_HEADER') ?? 'x-camerpay-signature').toLowerCase();
   }
 
-  /** Start (or resume) a payment for a booking. Amount is taken from the booking. */
+  /** Price + payment options for a subscription or a boost (amount always computed here). */
+  @UseGuards(JwtAuthGuard)
+  @Post('quote')
+  @HttpCode(200)
+  quote(@Req() req: any, @Body() dto: CheckoutQuoteQueryDto) {
+    return this.checkout.quote(userIdOf(req), dto);
+  }
+
+  /**
+   * Start (or resume) a payment: a booking (amount from the booking), a subscription
+   * (amount from the plan) or a boost (amount from the boost pricing). Wallet and
+   * included-boost payments are settled immediately.
+   */
   @UseGuards(JwtAuthGuard)
   @Post('payments')
   create(@Req() req: any, @Body() dto: CreateCheckoutPaymentDto) {

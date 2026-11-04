@@ -128,6 +128,17 @@ let ListingBoostService = ListingBoostService_1 = class ListingBoostService {
             if (!boost) {
                 throw new common_1.NotFoundException('Boost not found');
             }
+            if (transaction.status !== transaction_schema_1.TransactionStatus.SUCCESS) {
+                throw new common_1.BadRequestException('Payment not completed');
+            }
+            if (boost.status === listing_boost_schema_1.BoostStatus.ACTIVE && String(boost.transactionId ?? '') === String(transaction._id)) {
+                return boost;
+            }
+            const included = transaction.metadata?.includedInPlan === true;
+            if (!included && transaction.amount < boost.price) {
+                this.logger.error(`Boost ${boost._id} costs ${boost.price} but transaction ${transaction._id} paid ${transaction.amount}`);
+                throw new common_1.BadRequestException('Amount paid does not match the boost price');
+            }
             boost.status = listing_boost_schema_1.BoostStatus.ACTIVE;
             boost.transactionId = transaction._id;
             boost.paymentDate = new Date();

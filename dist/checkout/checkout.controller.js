@@ -27,6 +27,9 @@ let CheckoutController = class CheckoutController {
         this.checkout = checkout;
         this.signatureHeader = (config.get('CAMERPAY_SIGNATURE_HEADER') ?? 'x-camerpay-signature').toLowerCase();
     }
+    quote(req, dto) {
+        return this.checkout.quote(userIdOf(req), dto);
+    }
     create(req, dto) {
         return this.checkout.createPayment(userIdOf(req), dto);
     }
@@ -44,6 +47,16 @@ let CheckoutController = class CheckoutController {
     }
 };
 exports.CheckoutController = CheckoutController;
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Post)('quote'),
+    (0, common_1.HttpCode)(200),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, create_checkout_payment_dto_1.CheckoutQuoteQueryDto]),
+    __metadata("design:returntype", void 0)
+], CheckoutController.prototype, "quote", null);
 __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Post)('payments'),

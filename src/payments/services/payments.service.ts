@@ -64,6 +64,12 @@ export class PaymentsService {
   try {
     this.logger.log(`Initializing payment for user ${user._id}: ${JSON.stringify(dto)}`);
 
+    // Boosts used to be paid here with an amount chosen by the app. They now go
+    // through POST /checkout/payments (purpose "boost"), which prices them on the server.
+    if (dto.type === TransactionType.BOOST_LISTING) {
+      throw new BadRequestException('Please update the app to boost a listing.');
+    }
+
     const txRef = this.generateTransactionReference(dto.type);
     const { platformFee, paymentProcessingFee, netAmount } = this.calculateFees(
       dto.amount,

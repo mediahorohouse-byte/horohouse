@@ -32,6 +32,10 @@ export interface ReviewItem {
         checkOut: string | null;
         propertyTitle: string | null;
     } | null;
+    purchase?: {
+        purpose: string;
+        label: string | null;
+    } | null;
     guest: {
         id: string;
         name: string | null;

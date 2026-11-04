@@ -9,12 +9,16 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CheckoutPaymentSchema = exports.CheckoutPayment = exports.CHECKOUT_STATUSES = void 0;
+exports.CheckoutPaymentSchema = exports.CheckoutPayment = exports.CHECKOUT_STATUSES = exports.CHECKOUT_METHODS = void 0;
 const mongoose_1 = require("@nestjs/mongoose");
 const mongoose_2 = require("mongoose");
+exports.CHECKOUT_METHODS = ['mobile_money', 'card', 'wallet', 'plan_credit'];
 exports.CHECKOUT_STATUSES = ['pending', 'paid', 'failed', 'expired'];
 let CheckoutPayment = class CheckoutPayment {
+    purpose;
     bookingId;
+    purchase;
+    purchaseKey;
     userId;
     method;
     operator;
@@ -51,15 +55,27 @@ let CheckoutPayment = class CheckoutPayment {
 };
 exports.CheckoutPayment = CheckoutPayment;
 __decorate([
-    (0, mongoose_1.Prop)({ type: mongoose_2.Types.ObjectId, required: true, index: true }),
+    (0, mongoose_1.Prop)({ type: String, enum: ['booking', 'subscription', 'boost'], default: 'booking', index: true }),
+    __metadata("design:type", String)
+], CheckoutPayment.prototype, "purpose", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: mongoose_2.Types.ObjectId, index: true }),
     __metadata("design:type", mongoose_2.Types.ObjectId)
 ], CheckoutPayment.prototype, "bookingId", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: Object }),
+    __metadata("design:type", Object)
+], CheckoutPayment.prototype, "purchase", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: String }),
+    __metadata("design:type", String)
+], CheckoutPayment.prototype, "purchaseKey", void 0);
 __decorate([
     (0, mongoose_1.Prop)({ type: mongoose_2.Types.ObjectId, required: true, index: true }),
     __metadata("design:type", mongoose_2.Types.ObjectId)
 ], CheckoutPayment.prototype, "userId", void 0);
 __decorate([
-    (0, mongoose_1.Prop)({ type: String, enum: ['mobile_money', 'card'], required: true }),
+    (0, mongoose_1.Prop)({ type: String, enum: exports.CHECKOUT_METHODS, required: true }),
     __metadata("design:type", String)
 ], CheckoutPayment.prototype, "method", void 0);
 __decorate([
@@ -71,7 +87,7 @@ __decorate([
     __metadata("design:type", String)
 ], CheckoutPayment.prototype, "phone", void 0);
 __decorate([
-    (0, mongoose_1.Prop)({ type: Number, required: true, min: 1 }),
+    (0, mongoose_1.Prop)({ type: Number, required: true, min: 0 }),
     __metadata("design:type", Number)
 ], CheckoutPayment.prototype, "amount", void 0);
 __decorate([
@@ -185,5 +201,14 @@ exports.CheckoutPaymentSchema = mongoose_1.SchemaFactory.createForClass(Checkout
 exports.CheckoutPaymentSchema.index({ providerReference: 1 }, { unique: true, sparse: true });
 exports.CheckoutPaymentSchema.index({ status: 1, expiresAt: 1 });
 exports.CheckoutPaymentSchema.index({ reviewState: 1, reviewedAt: -1 }, { sparse: true });
-exports.CheckoutPaymentSchema.index({ bookingId: 1 }, { unique: true, partialFilterExpression: { status: 'pending' }, name: 'one_pending_per_booking' });
+exports.CheckoutPaymentSchema.index({ bookingId: 1 }, {
+    unique: true,
+    partialFilterExpression: { status: 'pending', bookingId: { $exists: true } },
+    name: 'one_pending_per_booking_v2',
+});
+exports.CheckoutPaymentSchema.index({ purchaseKey: 1 }, {
+    unique: true,
+    partialFilterExpression: { status: 'pending', purchaseKey: { $exists: true } },
+    name: 'one_pending_per_purchase',
+});
 //# sourceMappingURL=checkout-payment.schema.js.map

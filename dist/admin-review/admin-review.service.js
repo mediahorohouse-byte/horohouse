@@ -111,6 +111,7 @@ let AdminReviewService = AdminReviewService_1 = class AdminReviewService {
                     createdAt: iso(c.createdAt), paidAt: iso(c.paidAt), reference: c.merchantInvoiceId ?? null,
                     canRefundOnline: !!c.providerReference && !c.refundedAt,
                     booking: bookingView(c.bookingId), guest: guestView(c.userId),
+                    purchase: c.purpose && c.purpose !== 'booking' ? { purpose: c.purpose, label: c.purchase?.label ?? null } : null,
                 };
             }),
             ...txs.map((t) => {

@@ -23,6 +23,7 @@ import {
 import {
   Transaction,
   TransactionDocument,
+  TransactionStatus,
   TransactionType,
 } from '../schemas/transaction.schema';
 import {
@@ -539,6 +540,15 @@ export class SubscriptionsService implements OnModuleInit {
         throw new BadRequestException('Transaction is not for subscription');
       }
 
+      // Only paid transactions, and only once (the activate route and checkout can both call this)
+      if (transaction.status !== TransactionStatus.SUCCESS) {
+        throw new BadRequestException('Payment not completed');
+      }
+      if (transaction.subscriptionId) {
+        const done = await this.subscriptionModel.findById(transaction.subscriptionId).exec();
+        if (done) return done;
+      }
+
       const planName = transaction.metadata?.planName as SubscriptionPlan;
       const billingCycle = transaction.metadata?.billingCycle as BillingCycle;
 
@@ -549,6 +559,13 @@ export class SubscriptionsService implements OnModuleInit {
       const plan = await this.subscriptionPlanModel.findOne({ name: planName });
       if (!plan) {
         throw new NotFoundException('Subscription plan not found');
+      }
+
+      // /payments/initialize takes the amount from the app: never give a plan for less than its price
+      const planPrice = Number((plan.pricing as any)?.[billingCycle] ?? 0);
+      if (!(planPrice > 0) || transaction.amount < planPrice) {
+        this.logger.error(`Subscription ${planName}/${billingCycle} paid ${transaction.amount} but costs ${planPrice} (tx ${transactionId})`);
+        throw new BadRequestException('Amount paid does not match the plan price');
       }
 
       const startDate = new Date();

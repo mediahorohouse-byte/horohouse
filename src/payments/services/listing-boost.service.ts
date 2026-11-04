@@ -8,7 +8,7 @@ import {
   BoostType,
   BoostStatus,
 } from '../schemas/listing-boost.schema';
-import { Transaction, TransactionDocument, TransactionType } from '../schemas/transaction.schema';
+import { Transaction, TransactionDocument, TransactionStatus, TransactionType } from '../schemas/transaction.schema';
 import { Property, PropertyDocument } from '../../properties/schemas/property.schema';
 import { CreateListingBoostDto } from '../dto/payment.dto';
 
@@ -163,6 +163,20 @@ export class ListingBoostService {
 
       if (!boost) {
         throw new NotFoundException('Boost not found');
+      }
+
+      if (transaction.status !== TransactionStatus.SUCCESS) {
+        throw new BadRequestException('Payment not completed');
+      }
+      // Already done with this transaction: don't restart the clock
+      if (boost.status === BoostStatus.ACTIVE && String(boost.transactionId ?? '') === String(transaction._id)) {
+        return boost;
+      }
+      // Free boosts included in a plan are recorded with amount 0
+      const included = transaction.metadata?.includedInPlan === true;
+      if (!included && transaction.amount < boost.price) {
+        this.logger.error(`Boost ${boost._id} costs ${boost.price} but transaction ${transaction._id} paid ${transaction.amount}`);
+        throw new BadRequestException('Amount paid does not match the boost price');
       }
 
       // Activate boost

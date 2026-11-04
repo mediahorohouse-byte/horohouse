@@ -1,12 +1,30 @@
 import { HydratedDocument, Types } from 'mongoose';
-export type CheckoutMethod = 'mobile_money' | 'card';
+export type CheckoutMethod = 'mobile_money' | 'card' | 'wallet' | 'plan_credit';
+export declare const CHECKOUT_METHODS: CheckoutMethod[];
+export type CheckoutPurpose = 'booking' | 'subscription' | 'boost';
+export interface CheckoutPurchase {
+    label?: string;
+    planName?: string;
+    billingCycle?: 'monthly' | 'quarterly' | 'yearly';
+    propertyId?: string;
+    propertyTitle?: string;
+    boostType?: string;
+    duration?: number;
+    transactionId?: string;
+    subscriptionId?: string;
+    boostId?: string;
+    endsAt?: Date;
+}
 export type MomoOperator = 'orange_money' | 'mtn_momo';
 export type CheckoutStatus = 'pending' | 'paid' | 'failed' | 'expired';
 export declare const CHECKOUT_STATUSES: CheckoutStatus[];
 export type ReviewState = 'open' | 'refunding' | 'resolved';
 export type ReviewResolution = 'refunded_camerpay' | 'refunded_manually' | 'no_refund_needed';
 export declare class CheckoutPayment {
-    bookingId: Types.ObjectId;
+    purpose: CheckoutPurpose;
+    bookingId?: Types.ObjectId;
+    purchase?: CheckoutPurchase;
+    purchaseKey?: string;
     userId: Types.ObjectId;
     method: CheckoutMethod;
     operator?: MomoOperator;

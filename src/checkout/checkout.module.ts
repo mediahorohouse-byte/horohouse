@@ -4,6 +4,11 @@ import { Booking, BookingSchema } from '../bookings/schema/booking.schema';
 import { PaymentsModule } from '../payments/payments.module';
 import { Transaction, TransactionSchema } from '../payments/schemas/transaction.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
+import { ListingBoost, ListingBoostSchema } from '../payments/schemas/listing-boost.schema';
+import { Subscription, SubscriptionSchema } from '../payments/schemas/subscription.schema';
+import { Wallet, WalletSchema } from '../payments/schemas/wallet.schema';
+import { Property, PropertySchema } from '../properties/schemas/property.schema';
+import { PurchaseGateway } from './purchase.gateway';
 import { BookingPaymentGateway } from './booking-payment.gateway';
 import { CamerPayClient } from './camerpay.client';
 import { CheckoutExpiryJob } from './checkout-expiry.job';
@@ -19,11 +24,16 @@ import { CheckoutPayment, CheckoutPaymentSchema } from './schemas/checkout-payme
       { name: Booking.name, schema: BookingSchema },
       { name: Transaction.name, schema: TransactionSchema },
       { name: User.name, schema: UserSchema },
+      // Subscriptions / boosts / wallet payments (also registered by PaymentsModule)
+      { name: ListingBoost.name, schema: ListingBoostSchema },
+      { name: Subscription.name, schema: SubscriptionSchema },
+      { name: Wallet.name, schema: WalletSchema },
+      { name: Property.name, schema: PropertySchema },
     ]),
     forwardRef(() => PaymentsModule), // must export PaymentsService (BookingsModule already relies on it)
   ],
   controllers: [CheckoutController],
-  providers: [CheckoutService, CamerPayClient, BookingPaymentGateway, CheckoutExpiryJob],
+  providers: [CheckoutService, CamerPayClient, BookingPaymentGateway, PurchaseGateway, CheckoutExpiryJob],
   exports: [CheckoutService],
 })
 export class CheckoutModule {}
