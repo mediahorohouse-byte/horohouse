@@ -476,6 +476,13 @@ export class User {
   @Prop({ select: false })
   oauthCodeNewUser?: boolean;
 
+  // ── "Connect Google" from Login & security (one-time, 10 min) ─────────────
+  @Prop({ select: false })
+  oauthLinkHash?: string;
+
+  @Prop({ select: false })
+  oauthLinkExpires?: Date;
+
   @Prop({
     type: [
       {
@@ -682,6 +689,13 @@ export class User {
   @Prop({ default: true })
   pushNotifications: boolean;
 
+  /**
+   * Which push notifications the user wants (Settings → Notifications).
+   * Missing = on. Account, payment and security notices are always sent.
+   */
+  @Prop({ type: Object, default: {} })
+  notificationPrefs?: { messages?: boolean; bookings?: boolean; reminders?: boolean; reviews?: boolean };
+
   @Prop({
   type: [
     {
@@ -754,6 +768,7 @@ UserSchema.index({ 'preferences.preferredLocation': '2dsphere' });
 UserSchema.index({ 'recentlyViewed.propertyId': 1 });
 UserSchema.index({ 'sessions.id': 1 });
 UserSchema.index({ oauthCodeHash: 1 }, { sparse: true });
+UserSchema.index({ oauthLinkHash: 1 }, { sparse: true });
 UserSchema.index({ 'sessions.refreshToken': 1 });
 UserSchema.index({ 'sessions.expiresAt': 1 });
 UserSchema.index({ 'sessions.isActive': 1 });
@@ -800,6 +815,8 @@ UserSchema.set('toJSON', {
     delete ret.oauthCodeChallenge;
     delete ret.oauthCodeExpires;
     delete ret.oauthCodeNewUser;
+    delete ret.oauthLinkHash;
+    delete ret.oauthLinkExpires;
     // Strip the identity document id (admins get a signed link through TrustService)
     if (ret.identityVerification?.documentPublicId) {
       delete ret.identityVerification.documentPublicId;

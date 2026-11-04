@@ -1,3 +1,4 @@
+import { IsBoolean, IsOptional } from 'class-validator';
 import {
   Controller,
   Get,
@@ -32,6 +33,14 @@ import { JwtAuthGuard } from '../auth/guards/jwt.auth.guard';
 
 @ApiTags('Users')
 @ApiBearerAuth('JWT-auth')
+class NotificationPrefsDto {
+  @IsOptional() @IsBoolean() push?: boolean;
+  @IsOptional() @IsBoolean() messages?: boolean;
+  @IsOptional() @IsBoolean() bookings?: boolean;
+  @IsOptional() @IsBoolean() reminders?: boolean;
+  @IsOptional() @IsBoolean() reviews?: boolean;
+}
+
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class UsersController {
@@ -200,7 +209,20 @@ export class UsersController {
     @Req() req: any,
     @Body() updateUserDto: UpdateOwnProfileDto,
   ): Promise<User> {
-    return this.usersService.update(req.user.id, updateUserDto);
+    // Re-verification + duplicate check for a new email / phone
+    return this.usersService.updateOwnProfile(req.user.id, updateUserDto);
+  }
+
+  @Get('me/notification-preferences')
+  @ApiOperation({ summary: 'Which push notifications I get' })
+  async getNotificationPrefs(@Req() req: any) {
+    return this.usersService.getNotificationPrefs(req.user.id);
+  }
+
+  @Patch('me/notification-preferences')
+  @ApiOperation({ summary: 'Turn push notification groups on or off' })
+  async updateNotificationPrefs(@Req() req: any, @Body() dto: NotificationPrefsDto) {
+    return this.usersService.updateNotificationPrefs(req.user.id, dto);
   }
 
   @Patch('me/role')

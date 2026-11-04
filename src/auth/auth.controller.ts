@@ -252,6 +252,18 @@ export class AuthController {
     return this.authService.verifyEmail(dto.token);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @AllowIncompleteOnboarding()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Post('google/link-intent')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Start "Connect Google" for the signed-in account (one-time token, 10 min)' })
+  async googleLinkIntent(@Req() req: FastifyRequest & { user: any }) {
+    const u = req.user as any;
+    return this.authService.createGoogleLinkIntent(String(u.userId ?? u._id ?? u.sub));
+  }
+
   @Public()
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('google/exchange')
@@ -308,6 +320,19 @@ export class AuthController {
         picture: googleUser.picture,
         emailVerified: googleUser.emailVerified,
       };
+
+      // "Connect Google" from Login & security: link, don't sign in
+      if (target.kind === 'app' && target.linkToken) {
+        try {
+          await this.authService.linkGoogle(target.linkToken, dto);
+          res.redirect(withParams(target.url, { linked: '1' }), 302);
+        } catch (e: any) {
+          const inUse = e?.response?.code === 'GOOGLE_IN_USE';
+          this.logger.warn(`Google link failed: ${e?.message}`);
+          res.redirect(withParams(target.url, { error: inUse ? 'google_in_use' : 'link_failed' }), 302);
+        }
+        return res;
+      }
 
       if (target.kind === 'app') {
         // App: never put tokens in the URL. Hand over a one-time code that only

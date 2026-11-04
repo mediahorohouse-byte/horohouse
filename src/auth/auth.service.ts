@@ -93,6 +93,8 @@ export interface OAuthRedirectTarget {
   url: string;
   /** PKCE challenge from the app's redirect URI (`cc` param) */
   challenge?: string;
+  /** "Connect Google" for a signed-in user (`lt` param) instead of a sign-in */
+  linkToken?: string;
 }
 
 // ── Small helpers ─────────────────────────────────────────────────────────
@@ -578,9 +580,10 @@ async registerWithEmail(dto: RegisterWithEmailDto, req?: any): Promise<AuthToken
 
     if (appSchemes.includes(parsed.protocol)) {
       const challenge = parsed.searchParams.get('cc') || undefined;
+      const linkToken = parsed.searchParams.get('lt') || undefined;
       // Drop anything the app shouldn't receive from the start URL
-      for (const k of ['code', 'token', 'refresh', 'error', 'isNewUser', 'onboardingStatus']) parsed.searchParams.delete(k);
-      return { kind: 'app', url: parsed.toString(), challenge };
+      for (const k of ['code', 'token', 'refresh', 'error', 'isNewUser', 'onboardingStatus', 'lt', 'linked']) parsed.searchParams.delete(k);
+      return { kind: 'app', url: parsed.toString(), challenge, linkToken };
     }
 
     if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
@@ -654,6 +657,45 @@ async registerWithEmail(dto: RegisterWithEmailDto, req?: any): Promise<AuthToken
       isNewUser: !!consumed.oauthCodeNewUser,
       onboardingStatus: user.onboardingStatus,
     };
+  }
+
+  // ── Connect Google to the signed-in account ───────────────────────────────
+
+  /** Step 1 (signed in): a one-time token the app puts in the Google redirect */
+  async createGoogleLinkIntent(userId: string): Promise<{ linkToken: string }> {
+    const linkToken = crypto.randomBytes(24).toString('base64url');
+    await this.userModel.updateOne(
+      { _id: userId },
+      { oauthLinkHash: sha256(linkToken), oauthLinkExpires: new Date(Date.now() + 10 * 60 * 1000) },
+    );
+    return { linkToken };
+  }
+
+  /**
+   * Step 2 (Google callback): attach this Google account to the user who asked.
+   * Refused if the Google account already belongs to someone else.
+   */
+  async linkGoogle(linkToken: string, google: { googleId: string; picture?: string; emailVerified?: boolean }): Promise<void> {
+    if (!google.googleId) throw new UnauthorizedException('Google did not return an account id');
+    if (google.emailVerified === false) throw new UnauthorizedException('Your Google email address is not verified');
+
+    const user = await this.userModel
+      .findOneAndUpdate(
+        { oauthLinkHash: sha256(linkToken), oauthLinkExpires: { $gt: new Date() } },
+        { $unset: { oauthLinkHash: 1, oauthLinkExpires: 1 } },
+      )
+      .exec();
+    if (!user) throw new UnauthorizedException('This link has expired. Please try again.');
+
+    const owner = await this.userModel.findOne({ googleId: google.googleId }).select('_id').lean().exec();
+    if (owner && String((owner as any)._id) !== String(user._id)) {
+      throw new ConflictException({ message: 'This Google account is already used by another HoroHouse account', code: 'GOOGLE_IN_USE' });
+    }
+
+    const $set: Record<string, any> = { googleId: google.googleId };
+    if (!user.profilePicture && google.picture) $set.profilePicture = google.picture;
+    await this.userModel.updateOne({ _id: user._id }, { $set });
+    this.logger.log(`Google linked to user ${user._id}`);
   }
 
   /**
@@ -1468,6 +1510,15 @@ async registerWithEmail(dto: RegisterWithEmailDto, req?: any): Promise<AuthToken
       user.isActive = false;
       user.sessions = [];
       await user.save();
+
+      // A deactivated host's listings must not stay bookable
+      try {
+        const Property = this.userModel.db.model('Property');
+        const res = await Property.updateMany({ ownerId: user._id, isActive: true }, { $set: { isActive: false } }).exec();
+        if (res.modifiedCount) this.logger.log(`Hid ${res.modifiedCount} listing(s) of deactivated user ${userId}`);
+      } catch (e: any) {
+        this.logger.warn(`Could not hide listings of deactivated user ${userId}: ${e?.message}`);
+      }
 
       this.logger.log(`Account deactivated by user: ${userId}`);
 

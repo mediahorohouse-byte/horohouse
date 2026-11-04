@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  ConflictException,
   Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -421,6 +422,52 @@ export class ReviewsService {
     return { ...base, subRatingAverages };
   }
 
+  /**
+   * Host's own "Reviews" screen: published stay reviews on the listings they own,
+   * with the overall rating, the 1–5 distribution and the category averages.
+   * (GUEST reviews about them as a traveller are not included.)
+   */
+  async getHostStayReviews(hostId: string, page = 1, limit = 20): Promise<any> {
+    if (!Types.ObjectId.isValid(hostId)) throw new BadRequestException('Invalid user ID');
+    const safeLimit = Math.min(Math.max(1, limit), 50);
+    const props = await this.propertyModel
+      .find({ ownerId: new Types.ObjectId(hostId) })
+      .select('_id title')
+      .lean()
+      .exec();
+    const titles = new Map(props.map((p: any) => [String(p._id), p.title]));
+    const query: any = {
+      isActive: true,
+      isPublished: true,
+      reviewType: ReviewType.STAY,
+      propertyId: { $in: props.map((p: any) => p._id) },
+    };
+
+    const [reviews, total, all] = await Promise.all([
+      this.reviewModel
+        .find(query)
+        .populate('userId', 'name profilePicture')
+        .sort({ createdAt: -1 })
+        .skip((Math.max(1, page) - 1) * safeLimit)
+        .limit(safeLimit)
+        .lean()
+        .exec(),
+      this.reviewModel.countDocuments(query),
+      this.reviewModel.find(query).select('rating staySubRatings').lean().exec(),
+    ]);
+
+    const stats = this.calculateReviewStats(all);
+    return {
+      reviews: reviews.map((r: any) => ({ ...r, propertyTitle: titles.get(String(r.propertyId)) ?? null })),
+      total,
+      page: Math.max(1, page),
+      totalPages: Math.ceil(total / safeLimit),
+      averageRating: stats.averageRating,
+      ratingDistribution: stats.ratingDistribution,
+      subRatingAverages: this.calculateSubRatingAverages(all),
+    };
+  }
+
   async getInsightReviews(insightId: string, options: ReviewOptions = {}): Promise<any> {
     return this.findAll({ reviewType: ReviewType.INSIGHT, insightId }, options);
   }
@@ -633,7 +680,16 @@ export class ReviewsService {
       throw new ForbiddenException('You can only respond to reviews about yourself or your properties');
     }
 
-    review.response = dto.response;
+    // One public reply per review (admins can still correct one)
+    if (review.response && user.role !== UserRole.ADMIN) {
+      throw new ConflictException({ message: 'You already replied to this review', code: 'ALREADY_REPLIED' });
+    }
+    const text = String(dto.response ?? '').trim();
+    if (text.length < 2 || text.length > 1000) {
+      throw new BadRequestException('A reply must be between 2 and 1000 characters');
+    }
+
+    review.response = text;
     review.respondedBy = user._id as Types.ObjectId;
     review.respondedAt = new Date();
     await review.save();

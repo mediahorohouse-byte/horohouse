@@ -53,6 +53,13 @@ export class NotificationsService {
       this.logger.warn(`WebSocket notification emission failed: ${wsErr?.message}`);
     }
 
+    // Settings → Notifications: the in-app list always gets it; the phone push
+    // only if the user wants this kind (account / payment notices always go)
+    if (!(await this.wantsPush(String(createNotificationDto.userId), createNotificationDto.type))) {
+      this.logger.log(`Push skipped (user preference): ${saved._id}`);
+      return saved;
+    }
+
     // 🔥 Actually send an OS-level push (works even when app is backgrounded/killed)
     try {
       await this.pushNotificationsService.sendToUser(String(createNotificationDto.userId), {
@@ -72,6 +79,36 @@ export class NotificationsService {
     this.logger.log(`Notification created and sent: ${saved._id} for user ${createNotificationDto.userId}`);
     return saved;
   }
+  /** Push groups the user can turn off; anything else is always sent */
+  private static readonly PUSH_GROUPS: Record<string, 'messages' | 'bookings' | 'reminders' | 'reviews'> = {
+    [NotificationType.MESSAGE]: 'messages',
+    [NotificationType.BOOKING_REQUEST]: 'bookings',
+    [NotificationType.BOOKING_CONFIRMED]: 'bookings',
+    [NotificationType.BOOKING_CANCELLED]: 'bookings',
+    [NotificationType.BOOKING_REJECTED]: 'bookings',
+    [NotificationType.BOOKING_COMPLETED]: 'bookings',
+    [NotificationType.BOOKING_REMINDER]: 'reminders',
+    [NotificationType.REVIEW_REQUEST]: 'reminders',
+    [NotificationType.REVIEW_RECEIVED]: 'reviews',
+    [NotificationType.REVIEW_PUBLISHED]: 'reviews',
+    [NotificationType.REVIEW_RESPONSE]: 'reviews',
+  };
+
+  /** Does this user want a phone push for this kind of notification? */
+  async wantsPush(userId: string, type?: string): Promise<boolean> {
+    const group = type ? NotificationsService.PUSH_GROUPS[type] : undefined;
+    if (!group) return true; // payments, refunds, security, system notices
+    try {
+      if (!Types.ObjectId.isValid(userId)) return true;
+      const u: any = await this.userModel.findById(userId).select('pushNotifications notificationPrefs').lean().exec();
+      if (!u) return true;
+      if (u.pushNotifications === false) return false;
+      return u.notificationPrefs?.[group] !== false;
+    } catch {
+      return true; // never lose a notice because the check failed
+    }
+  }
+
   /**
    * Create notification for multiple users
    */
