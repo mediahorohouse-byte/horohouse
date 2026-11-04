@@ -221,6 +221,8 @@ export declare class User {
     oauthCodeChallenge?: string;
     oauthCodeExpires?: Date;
     oauthCodeNewUser?: boolean;
+    oauthLinkHash?: string;
+    oauthLinkExpires?: Date;
     sessions: UserSession[];
     licenseNumber?: string;
     agency?: string;
@@ -236,6 +238,12 @@ export declare class User {
     emailNotifications: boolean;
     smsNotifications: boolean;
     pushNotifications: boolean;
+    notificationPrefs?: {
+        messages?: boolean;
+        bookings?: boolean;
+        reminders?: boolean;
+        reviews?: boolean;
+    };
     pushTokens: PushToken[];
     location?: {
         type: 'Point';

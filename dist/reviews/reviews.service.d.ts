@@ -55,6 +55,7 @@ export declare class ReviewsService {
             value: number;
         };
     }>;
+    getHostStayReviews(hostId: string, page?: number, limit?: number, propertyId?: string): Promise<any>;
     getInsightReviews(insightId: string, options?: ReviewOptions): Promise<any>;
     getAgentReviews(agentId: string, options?: ReviewOptions): Promise<any>;
     getAgentReviewStats(agentId: string): Promise<{

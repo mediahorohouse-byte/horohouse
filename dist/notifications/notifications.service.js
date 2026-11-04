@@ -23,7 +23,8 @@ const notifications_gateway_1 = require("./notifications.gateway");
 const push_notifications_service_1 = require("./push-notifications.service");
 const email_service_1 = require("../email/email.service");
 const user_schema_1 = require("../users/schemas/user.schema");
-let NotificationsService = NotificationsService_1 = class NotificationsService {
+let NotificationsService = class NotificationsService {
+    static { NotificationsService_1 = this; }
     notificationModel;
     userModel;
     notificationsGateway;
@@ -57,6 +58,10 @@ let NotificationsService = NotificationsService_1 = class NotificationsService {
         catch (wsErr) {
             this.logger.warn(`WebSocket notification emission failed: ${wsErr?.message}`);
         }
+        if (!(await this.wantsPush(String(createNotificationDto.userId), createNotificationDto.type))) {
+            this.logger.log(`Push skipped (user preference): ${saved._id}`);
+            return saved;
+        }
         try {
             await this.pushNotificationsService.sendToUser(String(createNotificationDto.userId), {
                 title: createNotificationDto.title,
@@ -74,6 +79,37 @@ let NotificationsService = NotificationsService_1 = class NotificationsService {
         }
         this.logger.log(`Notification created and sent: ${saved._id} for user ${createNotificationDto.userId}`);
         return saved;
+    }
+    static PUSH_GROUPS = {
+        [notification_schema_1.NotificationType.MESSAGE]: 'messages',
+        [notification_schema_1.NotificationType.BOOKING_REQUEST]: 'bookings',
+        [notification_schema_1.NotificationType.BOOKING_CONFIRMED]: 'bookings',
+        [notification_schema_1.NotificationType.BOOKING_CANCELLED]: 'bookings',
+        [notification_schema_1.NotificationType.BOOKING_REJECTED]: 'bookings',
+        [notification_schema_1.NotificationType.BOOKING_COMPLETED]: 'bookings',
+        [notification_schema_1.NotificationType.BOOKING_REMINDER]: 'reminders',
+        [notification_schema_1.NotificationType.REVIEW_REQUEST]: 'reminders',
+        [notification_schema_1.NotificationType.REVIEW_RECEIVED]: 'reviews',
+        [notification_schema_1.NotificationType.REVIEW_PUBLISHED]: 'reviews',
+        [notification_schema_1.NotificationType.REVIEW_RESPONSE]: 'reviews',
+    };
+    async wantsPush(userId, type) {
+        const group = type ? NotificationsService_1.PUSH_GROUPS[type] : undefined;
+        if (!group)
+            return true;
+        try {
+            if (!mongoose_2.Types.ObjectId.isValid(userId))
+                return true;
+            const u = await this.userModel.findById(userId).select('pushNotifications notificationPrefs').lean().exec();
+            if (!u)
+                return true;
+            if (u.pushNotifications === false)
+                return false;
+            return u.notificationPrefs?.[group] !== false;
+        }
+        catch {
+            return true;
+        }
     }
     async createBulk(userIds, notificationData) {
         const notifications = userIds.map((userId) => ({

@@ -16,6 +16,8 @@ export declare class NotificationsService {
     private readonly logger;
     constructor(notificationModel: Model<NotificationDocument>, userModel: Model<UserDocument>, notificationsGateway: NotificationsGateway, pushNotificationsService: PushNotificationsService, emailService: EmailService);
     create(createNotificationDto: CreateNotificationDto): Promise<Notification>;
+    private static readonly PUSH_GROUPS;
+    wantsPush(userId: string, type?: string): Promise<boolean>;
     createBulk(userIds: string[], notificationData: Omit<CreateNotificationDto, 'userId'>): Promise<any[]>;
     findByUser(userId: string, query: QueryNotificationDto): Promise<{
         notifications: Notification[];

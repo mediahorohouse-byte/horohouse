@@ -44,6 +44,7 @@ export declare class ReviewsController {
     }>;
     getGuestReviews(userId: string, query: any): Promise<any>;
     getMyReviews(req: any, query: any): Promise<any>;
+    getMyHostReviews(req: any, query: any): Promise<any>;
     findOne(id: string): Promise<import("./schemas/review.schema").Review>;
     update(id: string, dto: UpdateReviewDto, req: any): Promise<import("./schemas/review.schema").Review>;
     respondToReview(id: string, dto: RespondReviewDto, req: any): Promise<import("./schemas/review.schema").Review>;

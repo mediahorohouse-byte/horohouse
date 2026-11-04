@@ -982,10 +982,18 @@ async registerWithEmail(dto: RegisterWithEmailDto, req?: any): Promise<AuthToken
 
       const plainSessions = userDoc.toObject().sessions;
 
+      // Older sessions stored placeholders ("Unknown Browser on Unknown OS",
+      // "Unknown Location"); show something readable or nothing instead
       return plainSessions.map((session: any) => ({
         ...session,
+        device: !session.device || /unknown/i.test(session.device)
+          ? AuthService.deviceFromUserAgent(session.userAgent)
+          : session.device,
+        location: session.location && !/unknown|local network/i.test(session.location) ? session.location : undefined,
         refreshToken: undefined,
         prevRefreshToken: undefined,
+        ipAddress: undefined,
+        userAgent: undefined,
       })) as UserSession[];
     } catch (error) {
       this.logger.error('Get sessions failed:', error);
@@ -1379,6 +1387,11 @@ async registerWithEmail(dto: RegisterWithEmailDto, req?: any): Promise<AuthToken
         sess.rotatedAt = new Date();
         sess.refreshToken = sha256(refreshToken);
         sess.lastActive = new Date();
+        // Sessions made before location lookup existed get one now
+        if (req && (!sess.location || /unknown|local network/i.test(sess.location))) {
+          sess.ipAddress = this.getClientIp(req);
+          sess.location = await this.getLocationFromIp(sess.ipAddress);
+        }
         sess.expiresAt = new Date(
           Date.now() + this.parseTokenExpiration(this.configService.get<string>('JWT_REFRESH_EXPIRATION', '7d')),
         );
@@ -1395,15 +1408,14 @@ async registerWithEmail(dto: RegisterWithEmailDto, req?: any): Promise<AuthToken
    */
   private getClientIp(req?: any): string {
     if (!req) return 'Unknown';
-
-    return req.ip ||
-      req.connection?.remoteAddress ||
+    // Behind Railway's proxy req.ip is the proxy; the client is the first
+    // x-forwarded-for entry
+    const fwd = req.headers?.['x-forwarded-for'];
+    const first = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(',')[0]?.trim();
+    return first ||
+      req.headers?.['x-real-ip'] ||
+      req.ip ||
       req.socket?.remoteAddress ||
-      (req.headers && (
-        req.headers['x-forwarded-for']?.split(',')[0] ||
-        req.headers['x-real-ip'] ||
-        req.headers['x-client-ip']
-      )) ||
       'Unknown';
   }
 
@@ -1411,22 +1423,29 @@ async registerWithEmail(dto: RegisterWithEmailDto, req?: any): Promise<AuthToken
    * Helper method to parse device information
    */
   private parseDeviceInfo(userAgent: string, deviceInfo?: any): string {
-    if (deviceInfo?.device) {
-      return deviceInfo.device;
+    // Sent by the app (model + OS); plain text only, kept short
+    if (typeof deviceInfo?.device === 'string' && deviceInfo.device.trim()) {
+      return deviceInfo.device.replace(/[^\p{L}\p{N} .,'’()·+_-]/gu, '').trim().slice(0, 80) || 'HoroHouse app';
     }
+    return AuthService.deviceFromUserAgent(userAgent);
+  }
 
-    // Simple user agent parsing
-    const ua = userAgent.toLowerCase();
+  /** Readable name from a user agent, including the app's own (okhttp / CFNetwork) */
+  static deviceFromUserAgent(userAgent?: string): string {
+    const ua = String(userAgent ?? '').toLowerCase();
+    if (ua.startsWith('okhttp') || (ua.includes('android') && !ua.includes('mozilla'))) return 'Android phone · HoroHouse app';
+    if (ua.includes('cfnetwork') || ua.includes('darwin')) return 'iPhone · HoroHouse app';
+    if (ua.includes('expo')) return 'HoroHouse app';
 
-    let browser = 'Unknown Browser';
-    let os = 'Unknown OS';
+    let browser = '';
+    let os = '';
 
-    // Detect browser
-    if (ua.includes('chrome')) browser = 'Chrome';
+    // Detect browser (Edge and Opera also say "chrome", so check them first)
+    if (ua.includes('edg/')) browser = 'Edge';
+    else if (ua.includes('opr/') || ua.includes('opera')) browser = 'Opera';
+    else if (ua.includes('chrome')) browser = 'Chrome';
     else if (ua.includes('firefox')) browser = 'Firefox';
     else if (ua.includes('safari')) browser = 'Safari';
-    else if (ua.includes('edge')) browser = 'Edge';
-    else if (ua.includes('opera')) browser = 'Opera';
 
     // Detect OS
     if (ua.includes('windows')) os = 'Windows';
@@ -1434,26 +1453,45 @@ async registerWithEmail(dto: RegisterWithEmailDto, req?: any): Promise<AuthToken
     else if (ua.includes('linux')) os = 'Linux';
     else if (ua.includes('android')) os = 'Android';
     else if (ua.includes('iphone') || ua.includes('ipad')) os = 'iOS';
+    // "linux" is also in Android UAs
+    if (ua.includes('android')) os = 'Android';
 
-    return `${browser} on ${os}`;
+    if (browser && os) return `${browser} · ${os}`;
+    return browser || os || 'Unknown device';
   }
 
   /**
    * Helper method to get location from IP (mock implementation)
    */
+  /**
+   * City, country from the IP (ip-api.com, free tier, no key). Returns ''
+   * when unknown so the app simply shows nothing. Turn off with SESSION_GEOIP=off.
+   * Results are cached for a day; a slow lookup never holds up sign-in for more than 1.5 s.
+   */
+  private static geoCache = new Map<string, { at: number; value: string }>();
   private async getLocationFromIp(ipAddress: string): Promise<string> {
-    // In a real implementation, you would use a service like:
-    // - MaxMind GeoIP
-    // - IPInfo.io
-    // - ip-api.com
-    // For now, return a mock location
+    const ip = String(ipAddress ?? '').replace(/^::ffff:/, '');
+    if (!ip || ip === 'Unknown' || this.configService.get<string>('SESSION_GEOIP') === 'off') return '';
+    // Private / proxy ranges have no location
+    if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|169\.254\.)/.test(ip) || ip === '::1' || /^f[cd]/i.test(ip)) return '';
 
-    if (ipAddress === 'Unknown' || ipAddress.startsWith('127.') || ipAddress.startsWith('192.168.')) {
-      return 'Local Network';
+    const hit = AuthService.geoCache.get(ip);
+    if (hit && Date.now() - hit.at < 24 * 3600_000) return hit.value;
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1500);
+    try {
+      const res = await fetch(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,city,country`, { signal: ctrl.signal });
+      const data: any = await res.json();
+      const value = data?.status === 'success' ? [data.city, data.country].filter(Boolean).join(', ').slice(0, 80) : '';
+      if (AuthService.geoCache.size > 5000) AuthService.geoCache.clear();
+      AuthService.geoCache.set(ip, { at: Date.now(), value });
+      return value;
+    } catch {
+      return '';
+    } finally {
+      clearTimeout(timer);
     }
-
-    // Mock location - in production, integrate with a real geolocation service
-    return 'Unknown Location';
   }
 
   /**

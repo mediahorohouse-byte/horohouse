@@ -46,6 +46,11 @@ export declare class AuthController {
     verifyEmail(dto: VerifyEmailDto): Promise<{
         message: string;
     }>;
+    googleLinkIntent(req: FastifyRequest & {
+        user: any;
+    }): Promise<{
+        linkToken: string;
+    }>;
     googleExchange(dto: OAuthExchangeDto, req: FastifyRequest): Promise<AuthTokens>;
     googleAuth(): Promise<void>;
     googleAuthRedirect(req: FastifyRequest, res: FastifyReply): Promise<never>;

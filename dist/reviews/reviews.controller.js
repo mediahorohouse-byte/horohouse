@@ -96,6 +96,9 @@ let ReviewsController = class ReviewsController {
             sortOrder: query.sortOrder || 'desc',
         });
     }
+    async getMyHostReviews(req, query) {
+        return this.reviewsService.getHostStayReviews(String(req.user.userId ?? req.user.id ?? req.user._id), query.page ? parseInt(query.page) : 1, query.limit ? parseInt(query.limit) : 20, typeof query.propertyId === 'string' ? query.propertyId : undefined);
+    }
     async findOne(id) {
         return this.reviewsService.findOne(id);
     }
@@ -264,6 +267,19 @@ __decorate([
     __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], ReviewsController.prototype, "getMyReviews", null);
+__decorate([
+    (0, common_1.Get)('host/me'),
+    (0, swagger_1.ApiBearerAuth)(),
+    (0, swagger_1.ApiOperation)({ summary: 'Stay reviews on my listings, with rating breakdown (host Reviews screen)' }),
+    (0, swagger_1.ApiQuery)({ name: 'page', required: false, type: Number }),
+    (0, swagger_1.ApiQuery)({ name: 'limit', required: false, type: Number }),
+    (0, swagger_1.ApiQuery)({ name: 'propertyId', required: false, type: String }),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], ReviewsController.prototype, "getMyHostReviews", null);
 __decorate([
     (0, common_1.Get)(':id'),
     (0, roles_guard_1.Public)(),

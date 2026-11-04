@@ -1,6 +1,13 @@
 import { UsersService } from './users.service';
 import { CreateUserDto, UpdateUserDto, UpdatePreferencesDto, CreateTenantDto, UpdateTenantDto, SetRoleDto, UpdateHostProfileDto, VerifyHostDto, RecordHostPayoutDto, UpdateOwnProfileDto } from './dto';
 import { User, UserRole } from './schemas/user.schema';
+declare class NotificationPrefsDto {
+    push?: boolean;
+    messages?: boolean;
+    bookings?: boolean;
+    reminders?: boolean;
+    reviews?: boolean;
+}
 export declare class UsersController {
     private readonly usersService;
     constructor(usersService: UsersService);
@@ -31,6 +38,20 @@ export declare class UsersController {
     updatePreferences(req: any, preferences: UpdatePreferencesDto): Promise<User>;
     uploadProfilePicture(req: any): Promise<User>;
     updateMe(req: any, updateUserDto: UpdateOwnProfileDto): Promise<User>;
+    getNotificationPrefs(req: any): Promise<{
+        push: boolean;
+        messages: boolean;
+        bookings: boolean;
+        reminders: boolean;
+        reviews: boolean;
+    }>;
+    updateNotificationPrefs(req: any, dto: NotificationPrefsDto): Promise<{
+        push: boolean;
+        messages: boolean;
+        bookings: boolean;
+        reminders: boolean;
+        reviews: boolean;
+    }>;
     setMyRole(req: any, body: SetRoleDto): Promise<User>;
     getMyHostVerification(req: any): Promise<{
         status: import("./schemas/user.schema").HostVerificationStatus;
@@ -95,3 +116,4 @@ export declare class UsersController {
     update(id: string, updateUserDto: UpdateUserDto): Promise<User>;
     remove(id: string): Promise<void>;
 }
+export {};

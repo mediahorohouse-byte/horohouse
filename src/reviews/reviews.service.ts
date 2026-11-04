@@ -427,7 +427,7 @@ export class ReviewsService {
    * with the overall rating, the 1–5 distribution and the category averages.
    * (GUEST reviews about them as a traveller are not included.)
    */
-  async getHostStayReviews(hostId: string, page = 1, limit = 20): Promise<any> {
+  async getHostStayReviews(hostId: string, page = 1, limit = 20, propertyId?: string): Promise<any> {
     if (!Types.ObjectId.isValid(hostId)) throw new BadRequestException('Invalid user ID');
     const safeLimit = Math.min(Math.max(1, limit), 50);
     const props = await this.propertyModel
@@ -436,11 +436,15 @@ export class ReviewsService {
       .lean()
       .exec();
     const titles = new Map(props.map((p: any) => [String(p._id), p.title]));
+    // Optional: one listing (must be one of the host's own)
+    const ids = propertyId && Types.ObjectId.isValid(propertyId)
+      ? props.filter((p: any) => String(p._id) === propertyId).map((p: any) => p._id)
+      : props.map((p: any) => p._id);
     const query: any = {
       isActive: true,
       isPublished: true,
       reviewType: ReviewType.STAY,
-      propertyId: { $in: props.map((p: any) => p._id) },
+      propertyId: { $in: ids },
     };
 
     const [reviews, total, all] = await Promise.all([

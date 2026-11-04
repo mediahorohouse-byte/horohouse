@@ -360,9 +360,10 @@ let AuthService = class AuthService {
         ];
         if (appSchemes.includes(parsed.protocol)) {
             const challenge = parsed.searchParams.get('cc') || undefined;
-            for (const k of ['code', 'token', 'refresh', 'error', 'isNewUser', 'onboardingStatus'])
+            const linkToken = parsed.searchParams.get('lt') || undefined;
+            for (const k of ['code', 'token', 'refresh', 'error', 'isNewUser', 'onboardingStatus', 'lt', 'linked'])
                 parsed.searchParams.delete(k);
-            return { kind: 'app', url: parsed.toString(), challenge };
+            return { kind: 'app', url: parsed.toString(), challenge, linkToken };
         }
         if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
             const allowed = [webBase, ...(this.configService.get('OAUTH_WEB_REDIRECTS') || '').split(',')]
@@ -421,6 +422,31 @@ let AuthService = class AuthService {
             isNewUser: !!consumed.oauthCodeNewUser,
             onboardingStatus: user.onboardingStatus,
         };
+    }
+    async createGoogleLinkIntent(userId) {
+        const linkToken = crypto.randomBytes(24).toString('base64url');
+        await this.userModel.updateOne({ _id: userId }, { oauthLinkHash: sha256(linkToken), oauthLinkExpires: new Date(Date.now() + 10 * 60 * 1000) });
+        return { linkToken };
+    }
+    async linkGoogle(linkToken, google) {
+        if (!google.googleId)
+            throw new common_1.UnauthorizedException('Google did not return an account id');
+        if (google.emailVerified === false)
+            throw new common_1.UnauthorizedException('Your Google email address is not verified');
+        const user = await this.userModel
+            .findOneAndUpdate({ oauthLinkHash: sha256(linkToken), oauthLinkExpires: { $gt: new Date() } }, { $unset: { oauthLinkHash: 1, oauthLinkExpires: 1 } })
+            .exec();
+        if (!user)
+            throw new common_1.UnauthorizedException('This link has expired. Please try again.');
+        const owner = await this.userModel.findOne({ googleId: google.googleId }).select('_id').lean().exec();
+        if (owner && String(owner._id) !== String(user._id)) {
+            throw new common_1.ConflictException({ message: 'This Google account is already used by another HoroHouse account', code: 'GOOGLE_IN_USE' });
+        }
+        const $set = { googleId: google.googleId };
+        if (!user.profilePicture && google.picture)
+            $set.profilePicture = google.picture;
+        await this.userModel.updateOne({ _id: user._id }, { $set });
+        this.logger.log(`Google linked to user ${user._id}`);
     }
     async checkEmail(email) {
         const user = await this.userModel
@@ -615,8 +641,14 @@ let AuthService = class AuthService {
             const plainSessions = userDoc.toObject().sessions;
             return plainSessions.map((session) => ({
                 ...session,
+                device: !session.device || /unknown/i.test(session.device)
+                    ? AuthService_1.deviceFromUserAgent(session.userAgent)
+                    : session.device,
+                location: session.location && !/unknown|local network/i.test(session.location) ? session.location : undefined,
                 refreshToken: undefined,
                 prevRefreshToken: undefined,
+                ipAddress: undefined,
+                userAgent: undefined,
             }));
         }
         catch (error) {
@@ -887,6 +919,10 @@ let AuthService = class AuthService {
                 sess.rotatedAt = new Date();
                 sess.refreshToken = sha256(refreshToken);
                 sess.lastActive = new Date();
+                if (req && (!sess.location || /unknown|local network/i.test(sess.location))) {
+                    sess.ipAddress = this.getClientIp(req);
+                    sess.location = await this.getLocationFromIp(sess.ipAddress);
+                }
                 sess.expiresAt = new Date(Date.now() + this.parseTokenExpiration(this.configService.get('JWT_REFRESH_EXPIRATION', '7d')));
                 user.markModified('sessions');
                 await user.save();
@@ -897,31 +933,40 @@ let AuthService = class AuthService {
     getClientIp(req) {
         if (!req)
             return 'Unknown';
-        return req.ip ||
-            req.connection?.remoteAddress ||
+        const fwd = req.headers?.['x-forwarded-for'];
+        const first = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(',')[0]?.trim();
+        return first ||
+            req.headers?.['x-real-ip'] ||
+            req.ip ||
             req.socket?.remoteAddress ||
-            (req.headers && (req.headers['x-forwarded-for']?.split(',')[0] ||
-                req.headers['x-real-ip'] ||
-                req.headers['x-client-ip'])) ||
             'Unknown';
     }
     parseDeviceInfo(userAgent, deviceInfo) {
-        if (deviceInfo?.device) {
-            return deviceInfo.device;
+        if (typeof deviceInfo?.device === 'string' && deviceInfo.device.trim()) {
+            return deviceInfo.device.replace(/[^\p{L}\p{N} .,'’()·+_-]/gu, '').trim().slice(0, 80) || 'HoroHouse app';
         }
-        const ua = userAgent.toLowerCase();
-        let browser = 'Unknown Browser';
-        let os = 'Unknown OS';
-        if (ua.includes('chrome'))
+        return AuthService_1.deviceFromUserAgent(userAgent);
+    }
+    static deviceFromUserAgent(userAgent) {
+        const ua = String(userAgent ?? '').toLowerCase();
+        if (ua.startsWith('okhttp') || (ua.includes('android') && !ua.includes('mozilla')))
+            return 'Android phone · HoroHouse app';
+        if (ua.includes('cfnetwork') || ua.includes('darwin'))
+            return 'iPhone · HoroHouse app';
+        if (ua.includes('expo'))
+            return 'HoroHouse app';
+        let browser = '';
+        let os = '';
+        if (ua.includes('edg/'))
+            browser = 'Edge';
+        else if (ua.includes('opr/') || ua.includes('opera'))
+            browser = 'Opera';
+        else if (ua.includes('chrome'))
             browser = 'Chrome';
         else if (ua.includes('firefox'))
             browser = 'Firefox';
         else if (ua.includes('safari'))
             browser = 'Safari';
-        else if (ua.includes('edge'))
-            browser = 'Edge';
-        else if (ua.includes('opera'))
-            browser = 'Opera';
         if (ua.includes('windows'))
             os = 'Windows';
         else if (ua.includes('macintosh') || ua.includes('mac os x'))
@@ -932,13 +977,39 @@ let AuthService = class AuthService {
             os = 'Android';
         else if (ua.includes('iphone') || ua.includes('ipad'))
             os = 'iOS';
-        return `${browser} on ${os}`;
+        if (ua.includes('android'))
+            os = 'Android';
+        if (browser && os)
+            return `${browser} · ${os}`;
+        return browser || os || 'Unknown device';
     }
+    static geoCache = new Map();
     async getLocationFromIp(ipAddress) {
-        if (ipAddress === 'Unknown' || ipAddress.startsWith('127.') || ipAddress.startsWith('192.168.')) {
-            return 'Local Network';
+        const ip = String(ipAddress ?? '').replace(/^::ffff:/, '');
+        if (!ip || ip === 'Unknown' || this.configService.get('SESSION_GEOIP') === 'off')
+            return '';
+        if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|169\.254\.)/.test(ip) || ip === '::1' || /^f[cd]/i.test(ip))
+            return '';
+        const hit = AuthService_1.geoCache.get(ip);
+        if (hit && Date.now() - hit.at < 24 * 3600_000)
+            return hit.value;
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 1500);
+        try {
+            const res = await fetch(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,city,country`, { signal: ctrl.signal });
+            const data = await res.json();
+            const value = data?.status === 'success' ? [data.city, data.country].filter(Boolean).join(', ').slice(0, 80) : '';
+            if (AuthService_1.geoCache.size > 5000)
+                AuthService_1.geoCache.clear();
+            AuthService_1.geoCache.set(ip, { at: Date.now(), value });
+            return value;
         }
-        return 'Unknown Location';
+        catch {
+            return '';
+        }
+        finally {
+            clearTimeout(timer);
+        }
     }
     parseTokenExpiration(expiration) {
         const regex = /^(\d+)([smhd])$/;
@@ -975,6 +1046,15 @@ let AuthService = class AuthService {
             user.isActive = false;
             user.sessions = [];
             await user.save();
+            try {
+                const Property = this.userModel.db.model('Property');
+                const res = await Property.updateMany({ ownerId: user._id, isActive: true }, { $set: { isActive: false } }).exec();
+                if (res.modifiedCount)
+                    this.logger.log(`Hid ${res.modifiedCount} listing(s) of deactivated user ${userId}`);
+            }
+            catch (e) {
+                this.logger.warn(`Could not hide listings of deactivated user ${userId}: ${e?.message}`);
+            }
             this.logger.log(`Account deactivated by user: ${userId}`);
             return { message: 'Account deactivated successfully' };
         }

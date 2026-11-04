@@ -28,6 +28,27 @@ export declare class UsersService {
     findByEmail(email: string): Promise<User | null>;
     findByPhoneNumber(phoneNumber: string): Promise<User | null>;
     update(id: string, updateUserDto: UpdateUserDto): Promise<User>;
+    getNotificationPrefs(id: string): Promise<{
+        push: boolean;
+        messages: boolean;
+        bookings: boolean;
+        reminders: boolean;
+        reviews: boolean;
+    }>;
+    updateNotificationPrefs(id: string, dto: {
+        push?: boolean;
+        messages?: boolean;
+        bookings?: boolean;
+        reminders?: boolean;
+        reviews?: boolean;
+    }): Promise<{
+        push: boolean;
+        messages: boolean;
+        bookings: boolean;
+        reminders: boolean;
+        reviews: boolean;
+    }>;
+    updateOwnProfile(id: string, dto: any): Promise<User>;
     setRole(id: string, newRole: UserRole): Promise<User>;
     updatePreferences(id: string, preferences: UpdatePreferencesDto): Promise<User>;
     uploadProfilePicture(userId: string, file: {

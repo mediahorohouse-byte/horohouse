@@ -128,13 +128,21 @@ let UsersService = UsersService_1 = class UsersService {
             throw new common_1.BadRequestException('Invalid user ID');
         }
         const user = await this.userModel
-            .findById(id)
-            .select('name profilePicture bio city country role createdAt emailVerified phoneVerified languages')
+            .findOne({ _id: id, isActive: { $ne: false } })
+            .select('name profilePicture bio city country role createdAt emailVerified phoneVerified languages identityVerification.status')
+            .lean()
             .exec();
         if (!user) {
             throw new common_1.NotFoundException('User not found');
         }
-        return user;
+        const { identityVerification, ...rest } = user;
+        return {
+            ...rest,
+            _id: String(user._id),
+            emailVerified: !!user.emailVerified,
+            phoneVerified: !!user.phoneVerified,
+            identityVerified: String(identityVerification?.status ?? '').toLowerCase() === 'verified',
+        };
     }
     async findByFirebaseUid(firebaseUid) {
         return this.userModel.findOne({ firebaseUid }).exec();
@@ -157,6 +165,79 @@ let UsersService = UsersService_1 = class UsersService {
             throw new common_1.NotFoundException('User not found');
         }
         this.logger.log(`✅ User updated: ${id}`);
+        return user;
+    }
+    async getNotificationPrefs(id) {
+        const u = await this.userModel.findById(id).select('pushNotifications notificationPrefs').lean().exec();
+        if (!u)
+            throw new common_1.NotFoundException('User not found');
+        const p = u.notificationPrefs ?? {};
+        return {
+            push: u.pushNotifications !== false,
+            messages: p.messages !== false,
+            bookings: p.bookings !== false,
+            reminders: p.reminders !== false,
+            reviews: p.reviews !== false,
+        };
+    }
+    async updateNotificationPrefs(id, dto) {
+        const $set = {};
+        if (typeof dto.push === 'boolean')
+            $set.pushNotifications = dto.push;
+        for (const k of ['messages', 'bookings', 'reminders', 'reviews']) {
+            if (typeof dto[k] === 'boolean')
+                $set[`notificationPrefs.${k}`] = dto[k];
+        }
+        if (Object.keys($set).length)
+            await this.userModel.updateOne({ _id: id }, { $set });
+        return this.getNotificationPrefs(id);
+    }
+    async updateOwnProfile(id, dto) {
+        if (!mongoose_2.Types.ObjectId.isValid(id))
+            throw new common_1.BadRequestException('Invalid user ID');
+        const current = await this.userModel.findById(id).select('email phoneNumber').lean().exec();
+        if (!current)
+            throw new common_1.NotFoundException('User not found');
+        const data = { ...dto };
+        if (typeof data.email === 'string') {
+            const email = data.email.trim().toLowerCase();
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+                throw new common_1.BadRequestException('Enter a valid email address');
+            if (email !== String(current.email ?? '').toLowerCase()) {
+                const taken = await this.userModel.exists({ _id: { $ne: id }, email });
+                if (taken)
+                    throw new common_1.ConflictException({ message: 'This email is already used by another account', field: 'email', code: 'EMAIL_TAKEN' });
+                data.email = email;
+                data.emailVerified = false;
+            }
+            else {
+                delete data.email;
+            }
+        }
+        if (typeof data.phoneNumber === 'string') {
+            const phone = data.phoneNumber.replace(/\s+/g, '');
+            if (!/^\+[1-9]\d{6,14}$/.test(phone))
+                throw new common_1.BadRequestException('Phone number must be in international format, e.g. +237612345678');
+            if (phone !== current.phoneNumber) {
+                const taken = await this.userModel.exists({ _id: { $ne: id }, phoneNumber: phone });
+                if (taken)
+                    throw new common_1.ConflictException({ message: 'This phone number is already used by another account', field: 'phone', code: 'PHONE_TAKEN' });
+                data.phoneNumber = phone;
+                data.phoneVerified = false;
+            }
+            else {
+                delete data.phoneNumber;
+            }
+        }
+        for (const k of ['role', 'password', 'googleId', 'isActive', 'sessions', 'identityVerification'])
+            delete data[k];
+        if (data.emailVerified === true)
+            delete data.emailVerified;
+        if (data.phoneVerified === true)
+            delete data.phoneVerified;
+        const user = await this.userModel.findByIdAndUpdate(id, { $set: data }, { new: true }).select('-firebaseUid').exec();
+        if (!user)
+            throw new common_1.NotFoundException('User not found');
         return user;
     }
     async setRole(id, newRole) {

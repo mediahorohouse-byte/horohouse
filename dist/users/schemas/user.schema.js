@@ -84,6 +84,8 @@ let User = class User {
     oauthCodeChallenge;
     oauthCodeExpires;
     oauthCodeNewUser;
+    oauthLinkHash;
+    oauthLinkExpires;
     sessions;
     licenseNumber;
     agency;
@@ -99,6 +101,7 @@ let User = class User {
     emailNotifications;
     smsNotifications;
     pushNotifications;
+    notificationPrefs;
     pushTokens;
     location;
     address;
@@ -267,6 +270,14 @@ __decorate([
     (0, mongoose_1.Prop)({ select: false }),
     __metadata("design:type", Boolean)
 ], User.prototype, "oauthCodeNewUser", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ select: false }),
+    __metadata("design:type", String)
+], User.prototype, "oauthLinkHash", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ select: false }),
+    __metadata("design:type", Date)
+], User.prototype, "oauthLinkExpires", void 0);
 __decorate([
     (0, mongoose_1.Prop)({
         type: [
@@ -457,6 +468,10 @@ __decorate([
     __metadata("design:type", Boolean)
 ], User.prototype, "pushNotifications", void 0);
 __decorate([
+    (0, mongoose_1.Prop)({ type: Object, default: {} }),
+    __metadata("design:type", Object)
+], User.prototype, "notificationPrefs", void 0);
+__decorate([
     (0, mongoose_1.Prop)({
         type: [
             {
@@ -524,6 +539,7 @@ exports.UserSchema.index({ 'preferences.preferredLocation': '2dsphere' });
 exports.UserSchema.index({ 'recentlyViewed.propertyId': 1 });
 exports.UserSchema.index({ 'sessions.id': 1 });
 exports.UserSchema.index({ oauthCodeHash: 1 }, { sparse: true });
+exports.UserSchema.index({ oauthLinkHash: 1 }, { sparse: true });
 exports.UserSchema.index({ 'sessions.refreshToken': 1 });
 exports.UserSchema.index({ 'sessions.expiresAt': 1 });
 exports.UserSchema.index({ 'sessions.isActive': 1 });
@@ -558,6 +574,8 @@ exports.UserSchema.set('toJSON', {
         delete ret.oauthCodeChallenge;
         delete ret.oauthCodeExpires;
         delete ret.oauthCodeNewUser;
+        delete ret.oauthLinkHash;
+        delete ret.oauthLinkExpires;
         if (ret.identityVerification?.documentPublicId) {
             delete ret.identityVerification.documentPublicId;
         }

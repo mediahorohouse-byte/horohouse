@@ -226,11 +226,13 @@ export class ReviewsController {
   @ApiOperation({ summary: 'Stay reviews on my listings, with rating breakdown (host Reviews screen)' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'propertyId', required: false, type: String })
   async getMyHostReviews(@Req() req: any, @Query() query: any) {
     return this.reviewsService.getHostStayReviews(
       String(req.user.userId ?? req.user.id ?? req.user._id),
       query.page ? parseInt(query.page) : 1,
       query.limit ? parseInt(query.limit) : 20,
+      typeof query.propertyId === 'string' ? query.propertyId : undefined,
     );
   }
 

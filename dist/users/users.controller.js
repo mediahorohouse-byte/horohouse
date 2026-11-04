@@ -13,6 +13,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UsersController = void 0;
+const class_validator_1 = require("class-validator");
 const common_1 = require("@nestjs/common");
 const swagger_1 = require("@nestjs/swagger");
 const users_service_1 = require("./users.service");
@@ -21,6 +22,42 @@ const user_schema_1 = require("./schemas/user.schema");
 const roles_guard_1 = require("../auth/guards/roles.guard");
 const roles_guard_2 = require("../auth/guards/roles.guard");
 const jwt_auth_guard_1 = require("../auth/guards/jwt.auth.guard");
+let NotificationPrefsDto = class NotificationPrefsDto {
+    push;
+    messages;
+    bookings;
+    reminders;
+    reviews;
+};
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsBoolean)(),
+    __metadata("design:type", Boolean)
+], NotificationPrefsDto.prototype, "push", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsBoolean)(),
+    __metadata("design:type", Boolean)
+], NotificationPrefsDto.prototype, "messages", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsBoolean)(),
+    __metadata("design:type", Boolean)
+], NotificationPrefsDto.prototype, "bookings", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsBoolean)(),
+    __metadata("design:type", Boolean)
+], NotificationPrefsDto.prototype, "reminders", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsBoolean)(),
+    __metadata("design:type", Boolean)
+], NotificationPrefsDto.prototype, "reviews", void 0);
+NotificationPrefsDto = __decorate([
+    (0, swagger_1.ApiTags)('Users'),
+    (0, swagger_1.ApiBearerAuth)('JWT-auth')
+], NotificationPrefsDto);
 let UsersController = class UsersController {
     usersService;
     constructor(usersService) {
@@ -82,7 +119,13 @@ let UsersController = class UsersController {
         return this.usersService.uploadProfilePicture(req.user.id, file);
     }
     async updateMe(req, updateUserDto) {
-        return this.usersService.update(req.user.id, updateUserDto);
+        return this.usersService.updateOwnProfile(req.user.id, updateUserDto);
+    }
+    async getNotificationPrefs(req) {
+        return this.usersService.getNotificationPrefs(req.user.id);
+    }
+    async updateNotificationPrefs(req, dto) {
+        return this.usersService.updateNotificationPrefs(req.user.id, dto);
     }
     async setMyRole(req, body) {
         if (!body.role) {
@@ -362,6 +405,23 @@ __decorate([
     __metadata("design:paramtypes", [Object, dto_1.UpdateOwnProfileDto]),
     __metadata("design:returntype", Promise)
 ], UsersController.prototype, "updateMe", null);
+__decorate([
+    (0, common_1.Get)('me/notification-preferences'),
+    (0, swagger_1.ApiOperation)({ summary: 'Which push notifications I get' }),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], UsersController.prototype, "getNotificationPrefs", null);
+__decorate([
+    (0, common_1.Patch)('me/notification-preferences'),
+    (0, swagger_1.ApiOperation)({ summary: 'Turn push notification groups on or off' }),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, NotificationPrefsDto]),
+    __metadata("design:returntype", Promise)
+], UsersController.prototype, "updateNotificationPrefs", null);
 __decorate([
     (0, common_1.Patch)('me/role'),
     (0, swagger_1.ApiOperation)({ summary: 'Set role explicitly (REGISTERED_USER | AGENT | LANDLORD | HOST | GUEST | STUDENT). ADMIN cannot be assigned here.' }),
@@ -761,8 +821,6 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], UsersController.prototype, "remove", null);
 exports.UsersController = UsersController = __decorate([
-    (0, swagger_1.ApiTags)('Users'),
-    (0, swagger_1.ApiBearerAuth)('JWT-auth'),
     (0, common_1.Controller)('users'),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard, roles_guard_1.RolesGuard),
     __metadata("design:paramtypes", [users_service_1.UsersService])

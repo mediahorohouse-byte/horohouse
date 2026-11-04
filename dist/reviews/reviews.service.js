@@ -277,6 +277,48 @@ let ReviewsService = ReviewsService_1 = class ReviewsService {
         const subRatingAverages = this.calculateSubRatingAverages(stayReviews);
         return { ...base, subRatingAverages };
     }
+    async getHostStayReviews(hostId, page = 1, limit = 20, propertyId) {
+        if (!mongoose_2.Types.ObjectId.isValid(hostId))
+            throw new common_1.BadRequestException('Invalid user ID');
+        const safeLimit = Math.min(Math.max(1, limit), 50);
+        const props = await this.propertyModel
+            .find({ ownerId: new mongoose_2.Types.ObjectId(hostId) })
+            .select('_id title')
+            .lean()
+            .exec();
+        const titles = new Map(props.map((p) => [String(p._id), p.title]));
+        const ids = propertyId && mongoose_2.Types.ObjectId.isValid(propertyId)
+            ? props.filter((p) => String(p._id) === propertyId).map((p) => p._id)
+            : props.map((p) => p._id);
+        const query = {
+            isActive: true,
+            isPublished: true,
+            reviewType: review_schema_1.ReviewType.STAY,
+            propertyId: { $in: ids },
+        };
+        const [reviews, total, all] = await Promise.all([
+            this.reviewModel
+                .find(query)
+                .populate('userId', 'name profilePicture')
+                .sort({ createdAt: -1 })
+                .skip((Math.max(1, page) - 1) * safeLimit)
+                .limit(safeLimit)
+                .lean()
+                .exec(),
+            this.reviewModel.countDocuments(query),
+            this.reviewModel.find(query).select('rating staySubRatings').lean().exec(),
+        ]);
+        const stats = this.calculateReviewStats(all);
+        return {
+            reviews: reviews.map((r) => ({ ...r, propertyTitle: titles.get(String(r.propertyId)) ?? null })),
+            total,
+            page: Math.max(1, page),
+            totalPages: Math.ceil(total / safeLimit),
+            averageRating: stats.averageRating,
+            ratingDistribution: stats.ratingDistribution,
+            subRatingAverages: this.calculateSubRatingAverages(all),
+        };
+    }
     async getInsightReviews(insightId, options = {}) {
         return this.findAll({ reviewType: review_schema_1.ReviewType.INSIGHT, insightId }, options);
     }
@@ -430,7 +472,14 @@ let ReviewsService = ReviewsService_1 = class ReviewsService {
         if (!canRespond) {
             throw new common_1.ForbiddenException('You can only respond to reviews about yourself or your properties');
         }
-        review.response = dto.response;
+        if (review.response && user.role !== user_schema_1.UserRole.ADMIN) {
+            throw new common_1.ConflictException({ message: 'You already replied to this review', code: 'ALREADY_REPLIED' });
+        }
+        const text = String(dto.response ?? '').trim();
+        if (text.length < 2 || text.length > 1000) {
+            throw new common_1.BadRequestException('A reply must be between 2 and 1000 characters');
+        }
+        review.response = text;
         review.respondedBy = user._id;
         review.respondedAt = new Date();
         await review.save();

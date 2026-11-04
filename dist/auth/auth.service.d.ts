@@ -66,6 +66,7 @@ export interface OAuthRedirectTarget {
     reason?: string;
     url: string;
     challenge?: string;
+    linkToken?: string;
 }
 export declare class AuthService {
     private userModel;
@@ -97,6 +98,14 @@ export declare class AuthService {
     resolveOAuthRedirect(state?: string): OAuthRedirectTarget;
     issueOAuthCode(user: UserDocument, challenge: string, isNewUser: boolean): Promise<string>;
     exchangeOAuthCode(code: string, codeVerifier: string, req?: any): Promise<AuthTokens>;
+    createGoogleLinkIntent(userId: string): Promise<{
+        linkToken: string;
+    }>;
+    linkGoogle(linkToken: string, google: {
+        googleId: string;
+        picture?: string;
+        emailVerified?: boolean;
+    }): Promise<void>;
     checkEmail(email: string): Promise<{
         exists: boolean;
         hasPassword: boolean;
@@ -148,6 +157,8 @@ export declare class AuthService {
     private generateTokens;
     private getClientIp;
     private parseDeviceInfo;
+    static deviceFromUserAgent(userAgent?: string): string;
+    private static geoCache;
     private getLocationFromIp;
     private parseTokenExpiration;
     cleanupExpiredSessions(): Promise<void>;

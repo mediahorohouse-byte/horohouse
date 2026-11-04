@@ -106,6 +106,10 @@ let AuthController = AuthController_1 = class AuthController {
     async verifyEmail(dto) {
         return this.authService.verifyEmail(dto.token);
     }
+    async googleLinkIntent(req) {
+        const u = req.user;
+        return this.authService.createGoogleLinkIntent(String(u.userId ?? u._id ?? u.sub));
+    }
     async googleExchange(dto, req) {
         return this.authService.exchangeOAuthCode(dto.code, dto.codeVerifier, req);
     }
@@ -133,6 +137,18 @@ let AuthController = AuthController_1 = class AuthController {
                 picture: googleUser.picture,
                 emailVerified: googleUser.emailVerified,
             };
+            if (target.kind === 'app' && target.linkToken) {
+                try {
+                    await this.authService.linkGoogle(target.linkToken, dto);
+                    res.redirect(withParams(target.url, { linked: '1' }), 302);
+                }
+                catch (e) {
+                    const inUse = e?.response?.code === 'GOOGLE_IN_USE';
+                    this.logger.warn(`Google link failed: ${e?.message}`);
+                    res.redirect(withParams(target.url, { error: inUse ? 'google_in_use' : 'link_failed' }), 302);
+                }
+                return res;
+            }
             if (target.kind === 'app') {
                 if (!target.challenge)
                     throw new common_1.BadRequestException('Missing sign-in challenge');
@@ -456,6 +472,19 @@ __decorate([
     __metadata("design:paramtypes", [auth_dto_1.VerifyEmailDto]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "verifyEmail", null);
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, onboarding_guard_1.AllowIncompleteOnboarding)(),
+    (0, throttler_1.Throttle)({ default: { limit: 10, ttl: 60000 } }),
+    (0, common_1.Post)('google/link-intent'),
+    (0, common_1.HttpCode)(common_1.HttpStatus.OK),
+    (0, swagger_1.ApiBearerAuth)(),
+    (0, swagger_1.ApiOperation)({ summary: 'Start "Connect Google" for the signed-in account (one-time token, 10 min)' }),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "googleLinkIntent", null);
 __decorate([
     (0, roles_guard_1.Public)(),
     (0, throttler_1.Throttle)({ default: { limit: 10, ttl: 60000 } }),
