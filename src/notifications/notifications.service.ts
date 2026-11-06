@@ -9,6 +9,8 @@ import { NotificationsGateway } from './notifications.gateway';
 import { PushNotificationsService } from './push-notifications.service';
 import { EmailService } from '../email/email.service';
 import { User, UserDocument, UserRole } from '../users/schemas/user.schema';
+import { Property } from '../properties/schemas/property.schema';
+import { listingCoverUrl, pushImageUrl } from './push-image';
 
 @Injectable()
 export class NotificationsService {
@@ -19,6 +21,8 @@ export class NotificationsService {
     private notificationModel: Model<NotificationDocument>,
     @InjectModel(User.name)
     private userModel: Model<UserDocument>,
+    @InjectModel(Property.name)
+    private propertyModel: Model<any>,
     private notificationsGateway: NotificationsGateway,
     private pushNotificationsService: PushNotificationsService,
     private emailService: EmailService,
@@ -62,9 +66,11 @@ export class NotificationsService {
 
     // 🔥 Actually send an OS-level push (works even when app is backgrounded/killed)
     try {
+      const image = await this.pushImageFor(createNotificationDto.metadata);
       await this.pushNotificationsService.sendToUser(String(createNotificationDto.userId), {
         title: createNotificationDto.title,
         body: createNotificationDto.message,
+        image,
         data: {
           route: createNotificationDto.link,
           notificationId: saved._id.toString(),
@@ -79,6 +85,24 @@ export class NotificationsService {
     this.logger.log(`Notification created and sent: ${saved._id} for user ${createNotificationDto.userId}`);
     return saved;
   }
+  /**
+   * Photo for the phone notification, like Airbnb: an explicit metadata.image,
+   * otherwise the main photo of the listing it's about (bookings, reviews…).
+   * Never blocks the push: any failure just means no photo.
+   */
+  private async pushImageFor(metadata?: Record<string, any>): Promise<string | undefined> {
+    try {
+      const explicit = pushImageUrl(metadata?.image);
+      if (explicit) return explicit;
+      const propertyId = metadata?.propertyId ? String(metadata.propertyId) : '';
+      if (!Types.ObjectId.isValid(propertyId)) return undefined;
+      const p: any = await this.propertyModel.findById(propertyId).select('images').lean().exec();
+      return listingCoverUrl(p?.images);
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Push groups the user can turn off; anything else is always sent */
   private static readonly PUSH_GROUPS: Record<string, 'messages' | 'bookings' | 'reminders' | 'reviews'> = {
     [NotificationType.MESSAGE]: 'messages',

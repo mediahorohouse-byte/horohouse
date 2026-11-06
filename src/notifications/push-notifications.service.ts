@@ -4,6 +4,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { DevicesService } from '../devices/devices.service';
+import { pushImageUrl } from './push-image';
 
 // Forces a genuine runtime dynamic import, bypassing TypeScript's
 // CommonJS transpilation of `import()` into `require()`.
@@ -39,7 +40,13 @@ export class PushNotificationsService implements OnModuleInit {
 
  async sendToUser(
   userId: string,
-  payload: { title: string; body: string; data?: Record<string, any> },
+  payload: {
+    title: string;
+    body: string;
+    data?: Record<string, any>;
+    /** Big photo under the text (e.g. the listing's main photo) */
+    image?: string;
+  },
 ): Promise<void> {
   try {
       if (!userId) return;
@@ -71,21 +78,35 @@ export class PushNotificationsService implements OnModuleInit {
         return;
       }
 
+      // Photo: Android shows it directly; iPhone needs the app's notification
+      // service extension (assets/NotificationService.m), which reads it from
+      // richContent or data.image. Without the extension the push still
+      // arrives, just without the photo.
+      const image = pushImageUrl(payload.image);
+      const data = { ...(payload.data ?? {}), ...(image ? { image } : {}) };
+
       const messages: ExpoPushMessage[] = [];
       for (const { token } of user.pushTokens) {
         if (!this.ExpoClass.isExpoPushToken(token)) {
           this.logger.warn(`Invalid Expo push token skipped: ${token}`);
           continue;
         }
-        messages.push({
+        const message: ExpoPushMessage = {
           to: token,
           sound: 'default',
           title: payload.title,
           body: payload.body,
-          data: payload.data ?? {},
+          data,
           channelId: 'default',
           priority: 'high',
-        });
+        };
+        if (image) {
+          // richContent / mutableContent need expo-server-sdk 3.15+; the cast
+          // keeps older typings compiling (older SDKs just pass the fields on)
+          (message as any).richContent = { image };
+          (message as any).mutableContent = true;
+        }
+        messages.push(message);
       }
 
      const chunks = this.expo.chunkPushNotifications(messages);

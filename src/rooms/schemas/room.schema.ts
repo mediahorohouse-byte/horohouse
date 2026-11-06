@@ -112,6 +112,17 @@ export class Room {
     @Prop({ min: 0 })
     cleaningFee?: number;
 
+    /** Room size in m² (shown to guests as "25 m²") */
+    @Prop({ min: 0, max: 5000 })
+    sizeSqm?: number;
+
+    /**
+     * Breakfast, per guest per night (XAF). When set, guests can pick the
+     * "Includes breakfast" rate; 0 / unset = no breakfast option.
+     */
+    @Prop({ min: 0 })
+    breakfastPrice?: number;
+
     // ── Amenities ─────────────────────────────────────────────────────────────
 
     @Prop({ type: Object, default: {} })

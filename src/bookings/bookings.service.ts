@@ -227,6 +227,12 @@ export class BookingsService {
         throw new BadRequestException('This room type is no longer available');
       }
     }
+    // Breakfast rate: only when the room offers it
+    const breakfastPrice = Number(room?.breakfastPrice) || 0;
+    if (dto.withBreakfast && !(breakfastPrice > 0)) {
+      throw new BadRequestException('This room does not offer breakfast');
+    }
+    const withBreakfast = !!dto.withBreakfast && breakfastPrice > 0;
 
     // ── 3. Check guest count ─────────────────────────────────────────────────
     const maxGuests = room?.maxGuests ?? (property as any).shortTermAmenities?.maxGuests ?? 99;
@@ -263,7 +269,9 @@ export class BookingsService {
       expiresAt: { $gt: now },
     }).exec();
     if (existingHold) {
-      if (existingHold.expiresAt!.getTime() > now.getTime() + RESUME_MIN_MS) {
+      // Same stay but the guest switched breakfast on/off: price differs, so start over
+      const sameRate = !!(existingHold as any).withBreakfast === withBreakfast;
+      if (sameRate && existingHold.expiresAt!.getTime() > now.getTime() + RESUME_MIN_MS) {
         return existingHold;
       }
       // Almost expired: release it now, or its own hold would make this new attempt a 409.
@@ -301,7 +309,13 @@ export class BookingsService {
     }
 
     // ── 5. Build price breakdown ─────────────────────────────────────────────
-    const priceBreakdown = this.computePrice(property, nights, room, checkIn, totalGuests);
+    const priceBreakdown: any = this.computePrice(property, nights, room, checkIn, totalGuests);
+    if (withBreakfast) {
+      // Per guest (infants eat free) per night; not part of the stay discount
+      const breakfastFee = Math.round(breakfastPrice * totalGuests * nights);
+      priceBreakdown.breakfastFee = breakfastFee;
+      priceBreakdown.totalAmount += breakfastFee;
+    }
 
     // ── 6. Determine host ────────────────────────────────────────────────────
     const rawHostRef = property.ownerId ?? property.agentId;
@@ -360,6 +374,7 @@ export class BookingsService {
       confirmedAt,
       expiresAt,
       guestNote: dto.guestNote,
+      withBreakfast,
     });
 
     const saved = await booking.save();

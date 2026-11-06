@@ -92,6 +92,11 @@ export class CreateBookingDto {
   @IsString()
   @Length(24, 24, { message: 'roomId must be a valid 24-character ObjectId' })
   roomId?: string;
+
+  @ApiPropertyOptional({ description: 'Hotels: the rate that includes breakfast (the room must offer it)' })
+  @IsOptional()
+  @IsBoolean()
+  withBreakfast?: boolean;
 }
 
 // ─── Cancel Booking ───────────────────────────────────────────────────────────

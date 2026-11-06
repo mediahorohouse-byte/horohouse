@@ -57,6 +57,8 @@ export interface BookingPriceBreakdown {
   extraGuests?: number;
   /** extraGuests × extra-guest fee × nights — already inside subtotal */
   extraGuestFee?: number;
+  /** Hotels: breakfast × guests × nights, added to the total (not discounted) */
+  breakfastFee?: number;
 }
 
 export interface BookingCancellation {
@@ -138,10 +140,18 @@ export class Booking {
       taxAmount: { type: Number, default: 0 },
       discountAmount: { type: Number, default: 0 },
       totalAmount: { type: Number, required: true },
+      // Were computed but dropped on save (not in this sub-schema)
+      extraGuests: { type: Number, default: 0 },
+      extraGuestFee: { type: Number, default: 0 },
+      breakfastFee: { type: Number, default: 0 },
     },
     required: true,
   })
   priceBreakdown: BookingPriceBreakdown;
+
+  /** Hotels: the guest chose the rate that includes breakfast */
+  @Prop({ default: false })
+  withBreakfast?: boolean;
 
   @Prop({ default: 'XAF' })
   currency: string;

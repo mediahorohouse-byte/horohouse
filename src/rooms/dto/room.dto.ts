@@ -104,6 +104,14 @@ export class CreateRoomDto {
     @IsOptional() @IsNumber() @Min(0)
     cleaningFee?: number;
 
+    @ApiPropertyOptional({ example: 25, description: 'Room size in m²' })
+    @IsOptional() @IsNumber() @Min(0) @Max(5000)
+    sizeSqm?: number;
+
+    @ApiPropertyOptional({ example: 3500, description: 'Breakfast per guest per night (XAF); 0 = no breakfast option' })
+    @IsOptional() @IsNumber() @Min(0) @Max(1000000)
+    breakfastPrice?: number;
+
     @ApiPropertyOptional({ type: RoomAmenitiesDto })
     @IsOptional() @IsObject() @ValidateNested() @Type(() => RoomAmenitiesDto)
     amenities?: RoomAmenitiesDto;

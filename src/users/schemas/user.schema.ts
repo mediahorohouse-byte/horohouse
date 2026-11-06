@@ -694,7 +694,15 @@ export class User {
    * Missing = on. Account, payment and security notices are always sent.
    */
   @Prop({ type: Object, default: {} })
-  notificationPrefs?: { messages?: boolean; bookings?: boolean; reminders?: boolean; reviews?: boolean };
+  notificationPrefs?: { messages?: boolean; bookings?: boolean; reminders?: boolean; reviews?: boolean; offers?: boolean };
+
+  /** Language the app is set to ('en' | 'fr'), used for push text sent by the server */
+  @Prop({ type: String, enum: ['en', 'fr'] })
+  appLanguage?: string;
+
+  /** Last "homes in <city> are going fast" reminder (at most one a week) */
+  @Prop({ type: Date })
+  lastListingNudgeAt?: Date;
 
   @Prop({
   type: [
@@ -788,6 +796,7 @@ UserSchema.index({ 'hostProfile.payoutHistory.status': 1 });
 UserSchema.index({ role: 1, 'hostProfile.operatingCity': 1 });
 // Notification
 UserSchema.index({ 'pushTokens.token': 1 });
+UserSchema.index({ 'recentlyViewed.viewedAt': -1 });
 // Student-specific indexes
 UserSchema.index({ 'studentProfile.verificationStatus': 1 });
 UserSchema.index({ 'studentProfile.ambassadorCode': 1 }, { sparse: true });

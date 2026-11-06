@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional } from 'class-validator';
 import {
   Controller,
   Get,
@@ -39,6 +39,10 @@ class NotificationPrefsDto {
   @IsOptional() @IsBoolean() bookings?: boolean;
   @IsOptional() @IsBoolean() reminders?: boolean;
   @IsOptional() @IsBoolean() reviews?: boolean;
+  /** "Tips and offers": reminders about homes you looked at */
+  @IsOptional() @IsBoolean() offers?: boolean;
+  /** App language, so pushes sent by the server use it */
+  @IsOptional() @IsIn(['en', 'fr']) language?: 'en' | 'fr';
 }
 
 @Controller('users')

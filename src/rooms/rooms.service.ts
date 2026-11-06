@@ -111,6 +111,8 @@ export class RoomsService {
             bedType: dto.bedType,
             price: dto.price,
             cleaningFee: dto.cleaningFee,
+            sizeSqm: dto.sizeSqm,
+            breakfastPrice: dto.breakfastPrice,
             quantity: Math.max(1, Math.floor(dto.quantity ?? 1)),
             description: dto.description,
             amenities: dto.amenities ?? {},

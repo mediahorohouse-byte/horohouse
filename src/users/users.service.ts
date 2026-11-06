@@ -242,13 +242,15 @@ export class UsersService {
       bookings: p.bookings !== false,
       reminders: p.reminders !== false,
       reviews: p.reviews !== false,
+      offers: p.offers !== false,
     };
   }
 
-  async updateNotificationPrefs(id: string, dto: { push?: boolean; messages?: boolean; bookings?: boolean; reminders?: boolean; reviews?: boolean }) {
-    const $set: Record<string, boolean> = {};
+  async updateNotificationPrefs(id: string, dto: { push?: boolean; messages?: boolean; bookings?: boolean; reminders?: boolean; reviews?: boolean; offers?: boolean; language?: 'en' | 'fr' }) {
+    const $set: Record<string, boolean | string> = {};
     if (typeof dto.push === 'boolean') $set.pushNotifications = dto.push;
-    for (const k of ['messages', 'bookings', 'reminders', 'reviews'] as const) {
+    if (dto.language === 'en' || dto.language === 'fr') $set.appLanguage = dto.language;
+    for (const k of ['messages', 'bookings', 'reminders', 'reviews', 'offers'] as const) {
       if (typeof dto[k] === 'boolean') $set[`notificationPrefs.${k}`] = dto[k] as boolean;
     }
     if (Object.keys($set).length) await this.userModel.updateOne({ _id: id }, { $set });
