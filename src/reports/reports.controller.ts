@@ -2,6 +2,7 @@ import {
     Controller, Get, Post, Body, Patch, Param, Delete,
     UseGuards, Query, Req,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ReportsService } from './reports.service';
 import { CreateReportDto } from './dto/create-report.dto';
 import { UpdateReportStatusDto } from './dto/update-report-status.dto';
@@ -19,6 +20,7 @@ export class ReportsController {
     // ── User: submit a report ─────────────────────────────────────────────────
 
     @Post('property/:propertyId')
+    @Throttle({ default: { limit: 5, ttl: 60_000 } })
     @UseGuards(JwtAuthGuard)
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Create a new report for a property' })

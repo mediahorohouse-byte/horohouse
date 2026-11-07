@@ -22,6 +22,8 @@ export type TranslationLanguage = (typeof TRANSLATION_LANGUAGES)[number];
 
 const LANGUAGE_NAMES: Record<TranslationLanguage, string> = { en: 'English', fr: 'French' };
 const DEFAULT_MODEL = 'claude-opus-5-5';
+/** If one of these declines a text, the API retries it on another model. Haiku has no such option. */
+const MODELS_WITH_FALLBACK = new Set(['claude-fable-5-1', 'claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5-5']);
 const MAX_CHARS = 5000;
 const CACHE_DAYS = 90;
 
@@ -122,8 +124,9 @@ export class TranslationsService {
       response = await this.client!.beta.messages.create({
         model: this.model,
         max_tokens: 16000,
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
+        ...(MODELS_WITH_FALLBACK.has(this.model)
+          ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' }
+          : {}),
         output_config: { effort: 'low' },
         system: translationPrompt(target),
         messages: [{ role: 'user', content: wrapUserText(text) }],

@@ -52,6 +52,8 @@ const PUBLIC_HOST_PROFILE_FIELDS = [
   'hostingSince',
 ] as const;
 
+import { isIdentityVerified } from '../common/identity.util';
+
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
@@ -1937,7 +1939,9 @@ export class UsersService {
           totalListings: 1,
           activeListings: 1,
           'hostProfile.isSuperhost': 1,
-          'hostProfile.verificationStatus': 1,
+          'hostProfile.verificationStatus': {
+            $cond: [{ $eq: ['$identityVerification.status', 'verified'] }, HostVerificationStatus.VERIFIED, '$hostProfile.verificationStatus'],
+          },
           'hostProfile.completedStays': 1,
           'hostProfile.responseRate': 1,
           averageRating: 1,
@@ -1990,17 +1994,16 @@ export class UsersService {
     // hostProfile, which sent the government ID photo URL, payout history, commission
     // rate and co-host IDs to anyone who opened /users/hosts/:id.
     const rawHp: any = (host.toObject() as any).hostProfile ?? null;
-    const hp: any = rawHp ? {} : null;
-    if (rawHp) {
+    // An ID approved by an admin counts: it used to be ignored here, so verified hosts got no badge.
+    const verified = isIdentityVerified(host.toObject());
+    const hp: any = rawHp || verified ? {} : null;
+    if (hp) {
       for (const key of PUBLIC_HOST_PROFILE_FIELDS) {
-        if (rawHp[key] !== undefined) hp[key] = rawHp[key];
+        if (rawHp?.[key] !== undefined) hp[key] = rawHp[key];
       }
       // Guests only need to know whether the identity is verified, not why a check failed.
-      hp.verificationStatus =
-        rawHp.verificationStatus === HostVerificationStatus.VERIFIED
-          ? HostVerificationStatus.VERIFIED
-          : HostVerificationStatus.UNVERIFIED;
-      hp.identityVerified = rawHp.verificationStatus === HostVerificationStatus.VERIFIED;
+      hp.verificationStatus = verified ? HostVerificationStatus.VERIFIED : HostVerificationStatus.UNVERIFIED;
+      hp.identityVerified = verified;
     }
 
     // Strip payout account identifiers for non-admin callers;
@@ -2075,7 +2078,9 @@ export class UsersService {
       averageRating: reviewStats.averageRating,
       reviewCount: reviewStats.totalReviews,
       isSuperhost: hp?.isSuperhost ?? false,
-      verificationStatus: hp?.verificationStatus ?? HostVerificationStatus.UNVERIFIED,
+      verificationStatus: isIdentityVerified(host)
+        ? HostVerificationStatus.VERIFIED
+        : hp?.verificationStatus ?? HostVerificationStatus.UNVERIFIED,
       responseRate: hp?.responseRate ?? null,
       responseTimeMinutes: hp?.responseTimeMinutes ?? null,
       occupancyRate,

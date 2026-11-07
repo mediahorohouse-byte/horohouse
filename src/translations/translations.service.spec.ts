@@ -71,6 +71,16 @@ describe('TranslationsService', () => {
     });
   });
 
+  it('a model without server-side fallback is not asked for one', async () => {
+    const { service, create } = build();
+    (service as any).model = 'claude-haiku-5-5';
+    await service.translateMessage(SENDER, ID, 'en');
+    const request = create.mock.calls[0][0];
+    expect(request.model).toBe('claude-haiku-5-5');
+    expect(request.fallbacks).toBeUndefined();
+    expect(request.betas).toBeUndefined();
+  });
+
   describe('reviews', () => {
     it('published reviews are open to anyone signed in', async () => {
       await expect(build().service.translateReview(STRANGER, ID, 'en')).resolves.toMatchObject({ text: 'Hello' });

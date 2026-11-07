@@ -1,8 +1,8 @@
 import {
-    Injectable, NotFoundException, BadRequestException, Logger,
+    Injectable, NotFoundException, BadRequestException, ConflictException, Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, Types, isValidObjectId } from 'mongoose';
 import { Report, ReportDocument } from './schemas/report.schema';
 import { Property, PropertyDocument } from '../properties/schemas/property.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
@@ -38,12 +38,33 @@ export class ReportsService {
         reporterId: string,
         propertyId: string,
     ): Promise<Report> {
+        if (!isValidObjectId(propertyId)) throw new NotFoundException('Listing not found');
+        const property: any = await this.propertyModel.findById(propertyId).select('ownerId agentId title').lean();
+        if (!property) throw new NotFoundException('Listing not found');
+        if ([String(property.ownerId), String(property.agentId ?? '')].includes(String(reporterId))) {
+            throw new BadRequestException('You can’t report your own listing');
+        }
+        const already = await this.reportModel.exists({ reporter: reporterId, property: propertyId, status: 'pending' });
+        if (already) throw new ConflictException('You already reported this listing');
+
         const report = new this.reportModel({
             ...createReportDto,
             reporter: reporterId,
             property: propertyId,
         });
-        return report.save();
+        const saved = await report.save();
+
+        // The report is saved: a failed notice must not lose it.
+        try {
+            await this.notificationsService.notifyAdmins({
+                title: 'Listing reported',
+                message: `${property.title ?? 'A listing'} was reported: ${createReportDto.reason}.`,
+                metadata: { propertyId: String(propertyId), reportId: String((saved as any)._id) },
+            });
+        } catch (err: any) {
+            this.logger.warn(`Report ${(saved as any)._id}: admins not notified: ${err?.message}`);
+        }
+        return saved;
     }
 
     // ── List ──────────────────────────────────────────────────────────────────

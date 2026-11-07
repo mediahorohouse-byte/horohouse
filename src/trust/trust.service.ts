@@ -34,6 +34,8 @@ export interface IdentityStatus {
  *  - a host sees a guest's verifications, stays and reviews from other hosts before
  *    accepting a request.
  */
+import { isIdentityVerified } from '../common/identity.util';
+
 @Injectable()
 export class TrustService {
   private readonly logger = new Logger(TrustService.name);
@@ -49,7 +51,7 @@ export class TrustService {
 
   /** Verified through the new flow, or as a host through the host ID check */
   static isVerified(u: any): boolean {
-    return u?.identityVerification?.status === 'verified' || u?.hostProfile?.verificationStatus === 'verified';
+    return isIdentityVerified(u);
   }
 
   async getMyIdentity(userId: string): Promise<IdentityStatus> {
