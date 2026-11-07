@@ -2,6 +2,7 @@ import { forwardRef, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Booking, BookingSchema } from '../bookings/schema/booking.schema';
 import { PaymentsModule } from '../payments/payments.module';
+import { BookingChangesModule } from '../booking-changes/booking-changes.module';
 import { Transaction, TransactionSchema } from '../payments/schemas/transaction.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
 import { ListingBoost, ListingBoostSchema } from '../payments/schemas/listing-boost.schema';
@@ -30,6 +31,7 @@ import { CheckoutPayment, CheckoutPaymentSchema } from './schemas/checkout-payme
       { name: Wallet.name, schema: WalletSchema },
       { name: Property.name, schema: PropertySchema },
     ]),
+    forwardRef(() => BookingChangesModule),
     forwardRef(() => PaymentsModule), // must export PaymentsService (BookingsModule already relies on it)
   ],
   controllers: [CheckoutController],

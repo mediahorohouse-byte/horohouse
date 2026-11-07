@@ -8,7 +8,7 @@ import {
 } from '@nestjs/swagger';
 import { PaymentsService } from '../services/payments.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt.auth.guard';
-import { Roles } from '../../auth/guards/roles.guard';
+import { Roles, RolesGuard } from '../../auth/guards/roles.guard';
 import { UserRole } from '../../users/schemas/user.schema';
 import {
   InitializePaymentDto, VerifyPaymentDto,
@@ -140,7 +140,7 @@ export class PaymentsController {
   // ── Admin ─────────────────────────────────────────────────────────────────
 
   @Get('admin/transactions')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Get all transactions (Admin)' })
   async getAllTransactions(@Query() query: TransactionQueryDto) {
@@ -148,7 +148,7 @@ export class PaymentsController {
   }
 
   @Get('admin/analytics')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Get payment analytics (Admin)' })
   async getPaymentAnalytics() {
@@ -156,7 +156,7 @@ export class PaymentsController {
   }
 
   @Post('admin/bookings/:bookingId/refund')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiOperation({
     summary: 'Process or retry refund for a booking (Admin)',

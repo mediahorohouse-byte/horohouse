@@ -20,6 +20,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
     "@fastify/cookie": "^11.1.2",
     "@fastify/cors": "^11.1.0",
     "@fastify/helmet": "^13.0.1",

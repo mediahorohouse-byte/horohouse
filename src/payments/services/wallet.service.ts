@@ -130,6 +130,59 @@ export class WalletService {
     return updated;
   }
 
+  // ─── Held booking income ────────────────────────────────────────────────────
+  // pendingBalance is kept apart from balance, so held money can't be withdrawn or
+  // spent at checkout: every debit checks balance.
+
+  /** Booking paid: the host's share waits here until it's released. */
+  async holdFunds(userId: string, amount: number): Promise<void> {
+    const wallet = await this.getOrCreateWallet(userId);
+    await this.walletModel.updateOne({ _id: wallet._id }, { $inc: { pendingBalance: amount } });
+    this.logger.log(`Wallet hold: ${userId} + ${amount} XAF`);
+  }
+
+  /** The guest was refunded: the held money never reaches the host. */
+  async dropHeldFunds(userId: string, amount: number): Promise<void> {
+    if (!(amount > 0)) return;
+    const wallet = await this.getOrCreateWallet(userId);
+    await this.walletModel.updateOne({ _id: wallet._id }, [
+      { $set: { pendingBalance: { $max: [0, { $subtract: [{ $ifNull: ['$pendingBalance', 0] }, amount] }] } } },
+    ] as any);
+    this.logger.log(`Wallet hold dropped: ${userId} - ${amount} XAF`);
+  }
+
+  /** One atomic update: held money becomes withdrawable and counts as earned. */
+  async releaseHeldFunds(userId: string, amount: number, description: string, reference?: string): Promise<void> {
+    if (!(amount > 0)) throw new BadRequestException('Invalid amount');
+    const wallet = await this.getOrCreateWallet(userId);
+    const now = new Date();
+    await this.walletModel.updateOne({ _id: wallet._id }, [
+      {
+        $set: {
+          pendingBalance: { $max: [0, { $subtract: [{ $ifNull: ['$pendingBalance', 0] }, amount] }] },
+          balance: { $add: ['$balance', amount] },
+          availableBalance: { $add: [{ $ifNull: ['$availableBalance', '$balance'] }, amount] },
+          totalEarned: { $add: [{ $ifNull: ['$totalEarned', 0] }, amount] },
+          lastTransactionDate: now,
+          transactions: {
+            $concatArrays: [
+              [{
+                type: WalletTransactionType.CREDIT,
+                amount,
+                balance: { $add: ['$balance', amount] },
+                description: { $literal: description },
+                reference: { $literal: reference ?? null },
+                createdAt: now,
+              }],
+              { $ifNull: ['$transactions', []] },
+            ],
+          },
+        },
+      },
+    ] as any);
+    this.logger.log(`Wallet hold released: ${userId} — ${amount} XAF`);
+  }
+
   async addCommission(
     agentId: string,
     amount: number,

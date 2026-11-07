@@ -18,6 +18,8 @@ import { buildIcalFeed, fetchIcal, normalizeIcalUrl, assertSafeIcalUrl, parseIca
 const MAX_EXTERNAL_CALENDARS = 5;
 import { uploadBufferToCloudinary, deleteFromCloudinary } from '../utils/cloudinary';
 import { WatermarkService } from '../watermark/watermark.service';
+import { CoHostsService } from '../co-hosts/co-hosts.service';
+import { bookedIdsPerWindow, firstOpenWindow, StayWindow, stayWindows } from './flexible-dates.util';
 
 import {
   Property,
@@ -68,6 +70,8 @@ export interface PropertySearchFilters {
   pricingUnit?: PricingUnit;
   checkIn?: Date;
   checkOut?: Date;
+  /** Also match the same stay moved this many days either way */
+  flexDays?: number;
   // Long-term / landlord-specific filters
   minArea?: number;
   maxArea?: number;
@@ -110,7 +114,8 @@ export class PropertiesService implements OnModuleInit {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     private historyService: HistoryService,
     private userInteractionsService: UserInteractionsService,
-    private watermarkService: WatermarkService
+    private watermarkService: WatermarkService,
+    private coHosts: CoHostsService,
   ) { }
 
   // ── Ensure DB indexes exist on startup ────────────────────────────────────
@@ -292,19 +297,7 @@ export class PropertiesService implements OnModuleInit {
       const query = this.buildBaseListQuery(filters, includeInactive);
       const sort: any = { [sortBy]: sortOrder === 'asc' ? 1 : -1 };
 
-      // Availability sub-query runs in parallel with the main queries
-      const availabilityPromise =
-        filters.checkIn && filters.checkOut
-          ? this.getBookedPropertyIds(filters.checkIn, filters.checkOut)
-          : Promise.resolve<Types.ObjectId[]>([]);
-
-      const bookedIds = await availabilityPromise;
-      if (bookedIds.length > 0) {
-        query._id = { $nin: bookedIds };
-      }
-      if (filters.checkIn && filters.checkOut) {
-        Object.assign(query, this.notHostBlockedFilter(filters.checkIn, filters.checkOut));
-      }
+      await this.applyDateFilter(query, filters);
 
       // Main query + count in parallel — both use .lean() to skip hydration
       const [properties, total] = await Promise.all([
@@ -321,9 +314,7 @@ export class PropertiesService implements OnModuleInit {
         this.propertyModel.countDocuments(query),
       ]);
 
-      if (filters.checkIn && filters.checkOut) {
-        await this.attachStayQuotes(properties as any[], filters.checkIn, filters.checkOut, filters.minGuests);
-      }
+      await this.attachDateQuotes(properties as any[], filters);
 
       // ── Fire-and-forget analytics (don't block the response) ──────────────
       if (user) {
@@ -1241,6 +1232,7 @@ export class PropertiesService implements OnModuleInit {
       pricingUnit?: PricingUnit;
       checkIn?: Date;
       checkOut?: Date;
+      flexDays?: number;
       latitude?: number;
       longitude?: number;
       radius?: number;
@@ -1277,17 +1269,7 @@ export class PropertiesService implements OnModuleInit {
       };
     }
 
-    // Availability — run in parallel with count
-    const availabilityPromise =
-      filters.checkIn && filters.checkOut
-        ? this.getBookedPropertyIds(filters.checkIn, filters.checkOut)
-        : Promise.resolve<Types.ObjectId[]>([]);
-
-    const bookedIds = await availabilityPromise;
-    if (bookedIds.length > 0) query._id = { $nin: bookedIds };
-    if (filters.checkIn && filters.checkOut) {
-      Object.assign(query, this.notHostBlockedFilter(filters.checkIn, filters.checkOut));
-    }
+    await this.applyDateFilter(query, filters);
 
     const sort: any = { [sortBy]: sortOrder === 'asc' ? 1 : -1 };
 
@@ -1305,11 +1287,72 @@ export class PropertiesService implements OnModuleInit {
       this.propertyModel.countDocuments(query),
     ]);
 
-    if (filters.checkIn && filters.checkOut) {
-      await this.attachStayQuotes(properties as any[], filters.checkIn, filters.checkOut, filters.minGuests);
-    }
+    await this.attachDateQuotes(properties as any[], filters);
 
     return { properties: properties as unknown as Property[], total, page, totalPages: Math.ceil(total / limit) };
+  }
+
+  /**
+   * Date searches leave out listings that can't take the stay. With flexible dates, a
+   * listing stays in if at least one of the moved stays is free.
+   */
+  private async applyDateFilter(
+    query: any,
+    filters: { checkIn?: Date; checkOut?: Date; flexDays?: number },
+  ): Promise<void> {
+    if (!filters.checkIn || !filters.checkOut) return;
+    if (!filters.flexDays) {
+      const bookedIds = await this.getBookedPropertyIds(filters.checkIn, filters.checkOut);
+      if (bookedIds.length > 0) query._id = { $nin: bookedIds };
+      Object.assign(query, this.notHostBlockedFilter(filters.checkIn, filters.checkOut));
+      return;
+    }
+    const windows = stayWindows(filters.checkIn, filters.checkOut, filters.flexDays);
+    const booked = bookedIdsPerWindow(windows, await this.getBookingsAcross(windows));
+    query.$and = [
+      ...(query.$and ?? []),
+      {
+        $or: windows.map((window, i) => ({
+          ...(booked[i].length ? { _id: { $nin: booked[i] } } : {}),
+          ...this.notHostBlockedFilter(window.checkIn, window.checkOut),
+        })),
+      },
+    ];
+  }
+
+  /**
+   * The price of the stay on each card. With flexible dates, each listing is priced for
+   * the closest stay it can actually take, and its quote says which dates those are.
+   */
+  private async attachDateQuotes(
+    properties: any[],
+    filters: { checkIn?: Date; checkOut?: Date; flexDays?: number; minGuests?: number },
+  ): Promise<void> {
+    if (!filters.checkIn || !filters.checkOut || !properties.length) return;
+    if (!filters.flexDays) {
+      await this.attachStayQuotes(properties, filters.checkIn, filters.checkOut, filters.minGuests);
+      return;
+    }
+    const windows = stayWindows(filters.checkIn, filters.checkOut, filters.flexDays);
+    const ids = properties.map((p) => p._id);
+    const [bookings, blocks] = await Promise.all([
+      this.getBookingsAcross(windows, ids),
+      this.propertyModel.find({ _id: { $in: ids } }).select('unavailableDates').lean().exec(),
+    ]);
+    const blocksById = new Map(blocks.map((p: any) => [String(p._id), p.unavailableDates ?? []]));
+
+    const byWindow = new Map<StayWindow, any[]>();
+    for (const card of properties) {
+      const open = firstOpenWindow(
+        windows,
+        bookings.filter((b) => String(b.propertyId) === String(card._id)),
+        blocksById.get(String(card._id)) ?? [],
+      );
+      if (!open) continue;
+      byWindow.set(open, [...(byWindow.get(open) ?? []), card]);
+    }
+    await Promise.all([...byWindow].map(([window, cards]) =>
+      this.attachStayQuotes(cards, window.checkIn, window.checkOut, filters.minGuests)));
   }
 
   /**
@@ -1363,6 +1406,8 @@ export class PropertiesService implements OnModuleInit {
       const discountAmount = pct > 0 ? Math.round((nightsTotal * pct) / 100) : 0;
       const cleaningFee = Number(p.cleaningFee ?? 0);
       card.stayQuote = {
+        checkIn: start.toISOString().slice(0, 10),
+        checkOut: new Date(start.getTime() + nights * 86_400_000).toISOString().slice(0, 10),
         nights,
         nightsTotal,
         discountPercent: pct,
@@ -1382,7 +1427,7 @@ export class PropertiesService implements OnModuleInit {
   async blockDates(propertyId: string, dto: BlockDatesDto, user: User): Promise<Property> {
     const property = await this.propertyModel.findById(propertyId);
     if (!property) throw new NotFoundException('Property not found');
-    this.assertCanManage(property, user);
+    await this.assertCanManageCalendar(property, user);
 
     if (property.listingType !== ListingType.SHORT_TERM) {
       throw new BadRequestException('Date blocking is only available for short-term listings');
@@ -1417,7 +1462,7 @@ export class PropertiesService implements OnModuleInit {
   async unblockDates(propertyId: string, dto: UnblockDatesDto, user: User): Promise<Property> {
     const property = await this.propertyModel.findById(propertyId).select('ownerId agentId listingType').lean().exec();
     if (!property) throw new NotFoundException('Property not found');
-    this.assertCanManage(property as unknown as Property, user);
+    await this.assertCanManageCalendar(property as unknown as Property, user);
 
     const fromDatesToRemove = dto.fromDates.map((d) => {
       const parsed = new Date(d);
@@ -1466,7 +1511,7 @@ export class PropertiesService implements OnModuleInit {
     if (!Types.ObjectId.isValid(propertyId)) throw new BadRequestException('Invalid property ID');
     const property = await this.propertyModel.findById(propertyId).exec();
     if (!property) throw new NotFoundException('Property not found');
-    this.assertCanManage(property, user);
+    await this.assertCanManageCalendar(property, user);
 
     const baseUrl = (process.env.API_URL || process.env.BACKEND_URL || 'https://horohouse.com/api').replace(/\/+$/, '');
     let token = (property as any).icalExportToken as string | undefined;
@@ -1495,7 +1540,7 @@ export class PropertiesService implements OnModuleInit {
     if (!Types.ObjectId.isValid(propertyId)) throw new BadRequestException('Invalid property ID');
     const property = await this.propertyModel.findById(propertyId).exec();
     if (!property) throw new NotFoundException('Property not found');
-    this.assertCanManage(property, user);
+    await this.assertCanManageCalendar(property, user);
 
     const update: any = {};
     if (dto.basePrice !== undefined) update.price = dto.basePrice;
@@ -1517,7 +1562,7 @@ export class PropertiesService implements OnModuleInit {
     if (!Types.ObjectId.isValid(propertyId)) throw new BadRequestException('Invalid property ID');
     const property = await this.propertyModel.findById(propertyId).exec();
     if (!property) throw new NotFoundException('Property not found');
-    this.assertCanManage(property, user);
+    await this.assertCanManageCalendar(property, user);
 
     const start = new Date(dto.from);
     const end = new Date(dto.to);
@@ -1550,7 +1595,7 @@ export class PropertiesService implements OnModuleInit {
     if (!Types.ObjectId.isValid(propertyId)) throw new BadRequestException('Invalid property ID');
     const property = await this.propertyModel.findById(propertyId).exec();
     if (!property) throw new NotFoundException('Property not found');
-    this.assertCanManage(property, user);
+    await this.assertCanManageCalendar(property, user);
 
     const existing = ((property as any).externalCalendars ?? []) as any[];
     if (existing.length >= MAX_EXTERNAL_CALENDARS) {
@@ -1637,7 +1682,7 @@ export class PropertiesService implements OnModuleInit {
     if (!Types.ObjectId.isValid(propertyId)) throw new BadRequestException('Invalid property ID');
     const property = await this.propertyModel.findById(propertyId).exec();
     if (!property) throw new NotFoundException('Property not found');
-    this.assertCanManage(property, user);
+    await this.assertCanManageCalendar(property, user);
     return this.syncExternalCalendar(propertyId, calendarId);
   }
 
@@ -1707,7 +1752,7 @@ export class PropertiesService implements OnModuleInit {
     if (!Types.ObjectId.isValid(propertyId)) throw new BadRequestException('Invalid property ID');
     const property = await this.propertyModel.findById(propertyId).exec();
     if (!property) throw new NotFoundException('Property not found');
-    this.assertCanManage(property, user);
+    await this.assertCanManageCalendar(property, user);
 
     // The app says "Nights imported from it will be unblocked" — this now does it.
     await this.propertyModel.findByIdAndUpdate(
@@ -1982,16 +2027,28 @@ export class PropertiesService implements OnModuleInit {
    * Uses dynamic model resolution to avoid circular imports.
    */
   private async getBookedPropertyIds(checkIn: Date, checkOut: Date): Promise<Types.ObjectId[]> {
+    const bookings = await this.getBookingsAcross([{ checkIn, checkOut }]);
+    return bookings.map((b) => b.propertyId);
+  }
+
+  /** Bookings holding whole listings on any night from the first stay to the last. */
+  private async getBookingsAcross(
+    windows: StayWindow[],
+    propertyIds?: unknown[],
+  ): Promise<{ propertyId: Types.ObjectId; checkIn: Date; checkOut: Date }[]> {
     try {
       const bookingModel = (this.propertyModel.db as any).model('Booking');
       if (!bookingModel) return [];
 
       const now = new Date();
-      const bookings = await bookingModel
+      const earliest = new Date(Math.min(...windows.map((w) => w.checkIn.getTime())));
+      const latest = new Date(Math.max(...windows.map((w) => w.checkOut.getTime())));
+      return await bookingModel
         .find({
+          ...(propertyIds ? { propertyId: { $in: propertyIds } } : {}),
           status: { $in: ['confirmed', 'pending'] },
-          checkIn: { $lt: checkOut },
-          checkOut: { $gt: checkIn },
+          checkIn: { $lt: latest },
+          checkOut: { $gt: earliest },
           $and: [
             // Hotel room bookings: one booked room doesn't make the whole hotel unavailable.
             { $or: [{ roomId: { $exists: false } }, { roomId: null }] },
@@ -1999,11 +2056,9 @@ export class PropertiesService implements OnModuleInit {
             { $or: [{ paymentStatus: 'paid' }, { expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gt: now } }] },
           ],
         })
-        .select('propertyId')
+        .select('propertyId checkIn checkOut')
         .lean()
         .exec();
-
-      return bookings.map((b: any) => b.propertyId);
     } catch {
       this.logger.warn('Booking model not available — skipping availability filter');
       return [];
@@ -2116,6 +2171,15 @@ export class PropertiesService implements OnModuleInit {
     }
     if (dto.shortTermAmenities?.checkOutTime && !/^\d{2}:\d{2}$/.test(dto.shortTermAmenities.checkOutTime)) {
       throw new BadRequestException('checkOutTime must be in HH:mm format');
+    }
+  }
+
+  /** The calendar is the one part of a listing its co-hosts can also run. */
+  private async assertCanManageCalendar(property: any, user: User): Promise<void> {
+    try {
+      this.assertCanManage(property, user);
+    } catch (err) {
+      if (!(await this.coHosts.isActive(user._id, property._id))) throw err;
     }
   }
 

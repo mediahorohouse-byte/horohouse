@@ -18,6 +18,8 @@ import { CamerPayService } from './services/camerpay.service';
 import { SubscriptionsService } from './services/subscriptions.service';
 import { ListingBoostService } from './services/listing-boost.service';
 import { WalletService } from './services/wallet.service';
+import { HostPayoutsService } from './services/host-payouts.service';
+import { CoHostsModule } from '../co-hosts/co-hosts.module';
 import { RevenueAnalyticsService } from './services/revenue-analytics.service';
 
 // Controllers
@@ -46,6 +48,7 @@ import { PaymentsScheduler } from 'src/bookings/payments.scheduler';
 
     ]),
     NotificationsModule,
+    CoHostsModule,
   ],
   controllers: [
     PaymentsController,
@@ -60,6 +63,7 @@ import { PaymentsScheduler } from 'src/bookings/payments.scheduler';
     SubscriptionsService,
     ListingBoostService,
     WalletService,
+    HostPayoutsService,
     RevenueAnalyticsService,
     PaymentsScheduler,
   ],
@@ -69,6 +73,7 @@ import { PaymentsScheduler } from 'src/bookings/payments.scheduler';
     SubscriptionsService,
     ListingBoostService,
     WalletService,
+    HostPayoutsService,
     RevenueAnalyticsService,
     PaymentsScheduler
   ],

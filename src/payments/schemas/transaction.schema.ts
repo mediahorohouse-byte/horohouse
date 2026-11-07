@@ -128,6 +128,10 @@ export class Transaction {
   @Prop()
   refundedAt?: Date;
 
+  /** XAF already given back. A partial refund leaves the payment SUCCESS with money left on it. */
+  @Prop({ default: 0 })
+  refundedAmount?: number;
+
   @Prop()
   refundReason?: string;
 

@@ -904,14 +904,19 @@ export class NotificationsService {
       guestName: string;
       amount: number;
       currency: string;
+      /** When the money can be withdrawn */
+      availableOn?: Date;
     },
   ): Promise<void> {
+    const when = params.availableOn
+      ? ` You can withdraw it from ${params.availableOn.toISOString().split('T')[0]}, about a day after check-in.`
+      : '';
     await this.create({
       userId: hostId,
       type: NotificationType.PAYMENT_RECEIVED,
       title: 'Payment received',
       message: `Payment of ${params.amount} ${params.currency} received for ` +
-        `${params.guestName}'s booking at ${params.propertyTitle}.`,
+        `${params.guestName}'s booking at ${params.propertyTitle}.${when}`,
       link: `/hosting/bookings/${params.bookingId}`,
       metadata: {
         bookingId: params.bookingId,
@@ -937,6 +942,8 @@ export class NotificationsService {
       propertyTitle: string;
       amount: number;
       currency: string;
+      /** For a reported problem or a date change: the booking wasn't necessarily cancelled */
+      forStay?: boolean;
     },
   ): Promise<void> {
     await this.create({
@@ -944,7 +951,7 @@ export class NotificationsService {
       type: NotificationType.REFUND_PROCESSED,
       title: 'Refund processed',
       message: `A refund of ${params.amount} ${params.currency} has been issued ` +
-        `for your cancelled booking at ${params.propertyTitle}.`,
+        `for your ${params.forStay ? 'stay' : 'cancelled booking'} at ${params.propertyTitle}.`,
       link: `/bookings/${params.bookingId}`,
       metadata: {
         bookingId: params.bookingId,

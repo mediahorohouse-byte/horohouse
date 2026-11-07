@@ -47,6 +47,11 @@ import { TrustModule } from './trust/trust.module';
 import { HostMessagesModule } from './host-messages/host-messages.module';
 import { WishlistsModule } from './wishlists/wishlists.module';
 import { AdminReviewModule } from './admin-review/admin-review.module';
+import { BookingIssuesModule } from './booking-issues/booking-issues.module';
+import { BookingChangesModule } from './booking-changes/booking-changes.module';
+import { CoHostsModule } from './co-hosts/co-hosts.module';
+import { PriceSuggestionsModule } from './price-suggestions/price-suggestions.module';
+import { TranslationsModule } from './translations/translations.module';
 
 @Module({
   imports: [
@@ -130,6 +135,11 @@ import { AdminReviewModule } from './admin-review/admin-review.module';
     HostMessagesModule,
     WishlistsModule,
     AdminReviewModule,
+    BookingIssuesModule,
+    BookingChangesModule,
+    CoHostsModule,
+    PriceSuggestionsModule,
+    TranslationsModule,
   ],
 
   controllers: [AppController],

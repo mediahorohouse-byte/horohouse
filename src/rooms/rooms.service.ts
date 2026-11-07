@@ -67,6 +67,8 @@ export interface RoomAvailabilityResult {
     bookedRanges: { checkIn: Date; checkOut: Date; bookingId: Types.ObjectId }[];
 }
 
+import { CoHostsService } from '../co-hosts/co-hosts.service';
+
 @Injectable()
 export class RoomsService {
     private readonly logger = new Logger(RoomsService.name);
@@ -75,6 +77,7 @@ export class RoomsService {
         @InjectModel(Room.name) private roomModel: Model<RoomDocument>,
         @InjectModel(Booking.name) private bookingModel: Model<BookingDocument>,
         @InjectModel(Property.name) private propertyModel: Model<PropertyDocument>,
+        private readonly coHosts: CoHostsService,
     ) { }
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -244,7 +247,7 @@ export class RoomsService {
         const property = await this.propertyModel.findById(room.propertyId).exec();
         if (!property) throw new NotFoundException('Parent property not found');
 
-        this.assertCanManage(property, user);
+        await this.assertCanManageCalendar(property, user);
 
         const newRanges = dto.ranges.map((r) => {
             const from = new Date(r.from);
@@ -275,7 +278,7 @@ export class RoomsService {
         const property = await this.propertyModel.findById(room.propertyId).exec();
         if (!property) throw new NotFoundException('Parent property not found');
 
-        this.assertCanManage(property, user);
+        await this.assertCanManageCalendar(property, user);
 
         const fromDates = dto.fromDates.map((d) => {
             const parsed = new Date(d);
@@ -304,7 +307,7 @@ export class RoomsService {
         const property = await this.propertyModel.findById(room.propertyId).exec();
         if (!property) throw new NotFoundException('Parent property not found');
 
-        this.assertCanManage(property, user);
+        await this.assertCanManageCalendar(property, user);
         // Calendar apps often share webcal:// links — same feed over https.
         const icalUrl = String(dto.icalUrl ?? '').trim().replace(/^webcal:\/\//i, 'https://');
         this.assertSafeIcalUrl(icalUrl);
@@ -333,7 +336,7 @@ export class RoomsService {
         if (user) {
             const property = await this.propertyModel.findById(room.propertyId).exec();
             if (!property) throw new NotFoundException('Parent property not found');
-            this.assertCanManage(property, user);
+            await this.assertCanManageCalendar(property, user);
         }
 
         if (!room.icalUrl) {
@@ -495,6 +498,15 @@ export class RoomsService {
         const room = await this.roomModel.findById(roomId).exec();
         if (!room) throw new NotFoundException('Room not found');
         return room;
+    }
+
+    /** The calendar is the one part of a listing its co-hosts can also run. */
+    private async assertCanManageCalendar(property: any, user: User): Promise<void> {
+      try {
+        this.assertCanManage(property, user);
+      } catch (err) {
+        if (!(await this.coHosts.isActive(user._id, property._id))) throw err;
+      }
     }
 
     private assertCanManage(property: Property, user: User): void {

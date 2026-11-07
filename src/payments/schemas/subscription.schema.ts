@@ -66,7 +66,7 @@ export type SubscriptionFeatures = {
   maxProperties?: number;       // -1 = unlimited
   bookingCalendar?: boolean;
   shortTermRentalSupport?: boolean;
-  smartPricing?: boolean;       // AI-based pricing
+  smartPricing?: boolean;       // Price suggestions from similar listings
   maintenanceTracking?: boolean;
   premiumVisibility?: boolean;
   dedicatedSupport?: boolean;

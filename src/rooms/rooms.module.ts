@@ -10,6 +10,7 @@ import { RoomsService } from './rooms.service';
 import { RoomsController } from './rooms.controller';
 import { IcalSyncService } from './ical-sync.service';
 import { BookingsModule } from '../bookings/bookings.module';
+import { CoHostsModule } from '../co-hosts/co-hosts.module';
 
 @Module({
     imports: [
@@ -19,6 +20,7 @@ import { BookingsModule } from '../bookings/bookings.module';
             { name: Property.name, schema: PropertySchema },
             { name: User.name, schema: UserSchema },
         ]),
+        CoHostsModule,
         forwardRef(() => BookingsModule), // prevents circular dep: Rooms <-> Bookings
     ],
     controllers: [RoomsController],

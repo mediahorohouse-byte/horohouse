@@ -39,6 +39,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt.auth.guard';
 import { RolesGuard, Roles, Public } from '../auth/guards/roles.guard';
 import { User, UserRole } from '../users/schemas/user.schema';
 import { PropertyType, ListingType, ApprovalStatus, PricingUnit, CancellationPolicy } from './schemas/property.schema';
+import { parseFlexDays } from './flexible-dates.util';
 
 // DTOs for API documentation
 class CreatePropertyRequestDto {
@@ -126,6 +127,7 @@ export class PropertiesController {
   @ApiQuery({ name: 'pricingUnit', required: false, enum: PricingUnit })
   @ApiQuery({ name: 'checkIn', required: false, type: String, description: 'ISO date — filters available properties' })
   @ApiQuery({ name: 'checkOut', required: false, type: String, description: 'ISO date — filters available properties' })
+  @ApiQuery({ name: 'flexDays', required: false, enum: [1, 2, 3, 7], description: 'Also match the same stay moved this many days either way' })
   @ApiQuery({ name: 'minArea', required: false, type: Number, description: 'Minimum area in m² (rent/sale)' })
   @ApiQuery({ name: 'maxArea', required: false, type: Number, description: 'Maximum area in m² (rent/sale)' })
   @ApiQuery({ name: 'furnished', required: false, type: Boolean, description: 'Filter furnished properties' })
@@ -156,6 +158,7 @@ export class PropertiesController {
       pricingUnit: query.pricingUnit,
       checkIn: query.checkIn ? new Date(query.checkIn) : undefined,
       checkOut: query.checkOut ? new Date(query.checkOut) : undefined,
+      flexDays: parseFlexDays(query.flexDays),
       // Long-term / landlord filters
       minArea: query.minArea ? parseFloat(query.minArea) : undefined,
       maxArea: query.maxArea ? parseFloat(query.maxArea) : undefined,
@@ -391,6 +394,7 @@ export class PropertiesController {
       radius: query.radius ? parseFloat(query.radius) : undefined,
       checkIn: query.checkIn ? new Date(query.checkIn) : undefined,
       checkOut: query.checkOut ? new Date(query.checkOut) : undefined,
+      flexDays: parseFlexDays(query.flexDays),
     };
     const options = {
       page: query.page ? parseInt(query.page) : 1,

@@ -10,6 +10,7 @@ import { BookingsScheduler } from './bookings.scheduler';
 import { RoomsModule } from '../rooms/rooms.module';
 import { NotificationsModule } from 'src/notifications/notifications.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { CoHostsModule } from '../co-hosts/co-hosts.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { PaymentsModule } from '../payments/payments.module';
     forwardRef(() => RoomsModule),
     forwardRef(() => PaymentsModule),
     NotificationsModule,
+    CoHostsModule,
   ],
   controllers: [BookingsController],
   providers: [BookingsService, BookingsScheduler],

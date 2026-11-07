@@ -27,6 +27,7 @@ import { ListingBoostService } from '../payments/services/listing-boost.service'
 import { WalletService } from '../payments/services/wallet.service';
 import { Property, PropertyDocument } from '../properties/schemas/property.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
+import { BookingChangesService } from '../booking-changes/booking-changes.service';
 import { normalizeCmPhone } from './momo.util';
 import type { CheckoutPaymentDocument, CheckoutPurchase, CheckoutPurpose } from './schemas/checkout-payment.schema';
 
@@ -36,6 +37,7 @@ const DURATIONS = [24, 168, 720];
 
 export interface PurchaseRequest {
   purpose: Exclude<CheckoutPurpose, 'booking'>;
+  changeId?: string;
   planName?: string;
   billingCycle?: 'monthly' | 'quarterly' | 'yearly';
   propertyId?: string;
@@ -54,7 +56,7 @@ export interface PurchaseQuote {
 }
 
 export interface QuoteView {
-  purpose: 'subscription' | 'boost';
+  purpose: 'subscription' | 'boost' | 'date_change';
   amount: number;
   currency: 'XAF';
   label: string;
@@ -89,6 +91,7 @@ export class PurchaseGateway {
     @Inject(forwardRef(() => SubscriptionsService)) private readonly subscriptions: SubscriptionsService,
     @Inject(forwardRef(() => ListingBoostService)) private readonly listingBoosts: ListingBoostService,
     @Inject(forwardRef(() => WalletService)) private readonly walletService: WalletService,
+    @Inject(forwardRef(() => BookingChangesService)) private readonly dateChanges: BookingChangesService,
   ) {}
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -100,6 +103,24 @@ export class PurchaseGateway {
     if (!user) throw new NotFoundException('Compte introuvable.');
     const local = normalizeCmPhone(user.phoneNumber);
     const base = { customerName: user.name, customerPhone: local ?? undefined };
+
+    if (req.purpose === 'date_change') {
+      if (!req.changeId || !isValidObjectId(req.changeId)) throw new BadRequestException('Demande invalide.');
+      const { change, title } = await this.dateChanges.payable(userId, req.changeId);
+      return {
+        ...base,
+        amount: change.amountDue,
+        key: `change:${req.changeId}`,
+        purchase: {
+          label: title,
+          propertyTitle: title,
+          changeId: req.changeId,
+          bookingId: String(change.bookingId),
+          checkIn: change.checkIn,
+          checkOut: change.checkOut,
+        },
+      };
+    }
 
     if (req.purpose === 'subscription') {
       const plans: any[] = await this.subscriptions.getPlans();
@@ -187,7 +208,7 @@ export class PurchaseGateway {
       label: q.purchase.label ?? '',
       purchase: q.purchase,
       walletBalance,
-      canUseWallet: walletBalance >= q.amount && q.amount > 0,
+      canUseWallet: req.purpose !== 'date_change' && walletBalance >= q.amount && q.amount > 0,
       planBoostsLeft,
       canUsePlanCredit: req.purpose === 'boost' && planBoostsLeft !== 0,
     };
@@ -248,6 +269,19 @@ export class PurchaseGateway {
   ): Promise<{ result: PurchaseResult; purchase: CheckoutPurchase; reason?: string }> {
     const purchase: CheckoutPurchase = { ...(payment.purchase ?? {}) };
     const userId = String(payment.userId);
+
+    if (payment.purpose === 'date_change') {
+      const outcome = await this.dateChanges.applyPaid(String(purchase.changeId), {
+        amount: payment.amount,
+        providerReference: payment.providerReference,
+        merchantInvoiceId: payment.merchantInvoiceId,
+        paymentMethod: this.methodOf(payment),
+        paidAt: payment.paidAt,
+        checkoutPaymentId: String(payment._id),
+      });
+      if (!outcome.ok) return { result: 'not_possible', purchase, reason: outcome.reason };
+      return { result: 'activated', purchase: { ...purchase, endsAt: outcome.checkOut } };
+    }
 
     // Retry after a crash: the Transaction exists already
     let tx: TransactionDocument | null = purchase.transactionId ? await this.transactions.findById(purchase.transactionId) : null;

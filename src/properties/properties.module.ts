@@ -11,6 +11,7 @@ import { Inquiry, InquirySchema } from './schemas/inquiry.schema';
 import { Comparison, ComparisonSchema } from './schemas/comparison.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
 import { HistoryModule } from '../history/history.module';
+import { CoHostsModule } from '../co-hosts/co-hosts.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { UserInteractionsModule } from '../user-interactions/user-interactions.module';
 import { UsersModule } from '../users/users.module';
@@ -26,6 +27,7 @@ import { PropertyCalendarScheduler } from './property-calendar.scheduler';
       { name: User.name, schema: UserSchema },
     ]),
     HistoryModule,
+    CoHostsModule,
     NotificationsModule,
     UserInteractionsModule,
     // PropertiesController uses UsersService for the host ID check.

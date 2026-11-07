@@ -11,6 +11,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { IsIn, IsMongoId, IsNumber, IsOptional, IsString, Length, Matches, Max, Min } from 'class-validator';
 import { WalletService } from '../services/wallet.service';
+import { HostPayoutsService } from '../services/host-payouts.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt.auth.guard';
 import { Roles, RolesGuard } from '../../auth/guards/roles.guard';
 import { UserRole } from '../../users/schemas/user.schema';
@@ -52,7 +53,16 @@ class AutoWithdrawDto {
 // did nothing: any logged-in user could credit their own wallet and withdraw real money.
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class WalletController {
-  constructor(private readonly walletService: WalletService) {}
+  constructor(
+    private readonly walletService: WalletService,
+    private readonly hostPayouts: HostPayoutsService,
+  ) {}
+
+  @Get('held-payouts')
+  @ApiOperation({ summary: 'Booking income not withdrawable yet, and when it will be' })
+  async getHeldPayouts(@Req() req: any) {
+    return this.hostPayouts.listHeld(String(req.user._id ?? req.user.id));
+  }
 
   @Get()
   @UseGuards(JwtAuthGuard)

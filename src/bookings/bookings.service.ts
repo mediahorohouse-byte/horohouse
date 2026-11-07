@@ -11,12 +11,16 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 
-import { Booking, BookingDocument, BookingStatus, PaymentStatus, CancelledBy } from './schema/booking.schema';
+import {
+  BookingPriceBreakdown,
+  Booking, BookingDocument, BookingStatus, PaymentStatus, CancelledBy } from './schema/booking.schema';
 import { Property, PropertyDocument, PropertyStatus, ApprovalStatus } from '../properties/schemas/property.schema';
 import { User, UserDocument, UserRole } from '../users/schemas/user.schema';
 import { RoomsService } from '../rooms/rooms.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentsService } from '../payments/services/payments.service';
+import { HostPayoutsService } from '../payments/services/host-payouts.service';
+import { CoHostsService } from '../co-hosts/co-hosts.service';
 import {
   CreateBookingDto,
   CancelBookingDto,
@@ -110,6 +114,9 @@ export class BookingsService {
     private readonly notificationsService: NotificationsService,
     @Inject(forwardRef(() => PaymentsService))
     private readonly paymentsService: PaymentsService,
+    @Inject(forwardRef(() => HostPayoutsService))
+    private readonly hostPayouts: HostPayoutsService,
+    private readonly coHosts: CoHostsService,
   ) { }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -147,73 +154,8 @@ export class BookingsService {
       throw new BadRequestException('This property is not currently available');
     }
 
-    // ── 2. Parse & validate dates ────────────────────────────────────────────
-    const checkIn = new Date(dto.checkIn);
-    const checkOut = new Date(dto.checkOut);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    if (isNaN(checkIn.getTime()) || isNaN(checkOut.getTime())) {
-      throw new BadRequestException('Invalid check-in or check-out date');
-    }
-
-    if (checkIn < today) {
-      throw new BadRequestException('Check-in date cannot be in the past');
-    }
-
-    if (checkOut <= checkIn) {
-      throw new BadRequestException('Check-out must be after check-in');
-    }
-
-    const nights = Math.ceil(
-      (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24),
-    );
-
-    const minNights = (property as any).minNights ?? 1;
-    const maxNights = (property as any).maxNights ?? 365;
-
-    if (nights < minNights) {
-      throw new BadRequestException(
-        `Minimum stay for this property is ${minNights} night(s)`,
-      );
-    }
-
-    if (nights > maxNights) {
-      throw new BadRequestException(
-        `Maximum stay for this property is ${maxNights} night(s)`,
-      );
-    }
-
-    // ── 2b. Advance notice & booking window validation ───────────────────────
-    // The host calendar saves noticeDays / windowMonths; older listings use
-    // advanceNoticeDays / bookingWindowDays. Only the old fields were checked, so the
-    // calendar's settings had no effect. windowMonths null = "Any time".
-    const advanceNoticeDays = Math.max(
-      Number((property as any).noticeDays ?? 0),
-      Number((property as any).advanceNoticeDays ?? 0),
-    );
-    const windowMonths = (property as any).windowMonths;
-    const bookingWindowDays =
-      windowMonths === null
-        ? Number.POSITIVE_INFINITY
-        : typeof windowMonths === 'number' && windowMonths > 0
-          ? Math.round(windowMonths * 30.44)
-          : Number((property as any).bookingWindowDays ?? 365);
-    const daysTilCheckin = Math.ceil(
-      (checkIn.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
-    );
-
-    if (daysTilCheckin < advanceNoticeDays) {
-      throw new BadRequestException(
-        `This property requires at least ${advanceNoticeDays} day(s) advance notice before check-in`,
-      );
-    }
-
-    if (daysTilCheckin > bookingWindowDays) {
-      throw new BadRequestException(
-        `Bookings can only be made up to ${bookingWindowDays} day(s) in advance for this property`,
-      );
-    }
+    // ── 2. Dates: valid, stay length, advance notice, booking window ─────────
+    const { checkIn, checkOut, nights } = this.assertStayAllowed(property, new Date(dto.checkIn), new Date(dto.checkOut));
 
     // ── 2c. Hotel room: load it so price, fees and capacity come from the room ─
     // (computePrice used to charge property.price for every room type.)
@@ -401,6 +343,12 @@ export class BookingsService {
           checkIn: fmt(checkIn),
           checkOut: fmt(checkOut),
         });
+        await this.coHosts.notifyCoHosts(dto.propertyId, {
+          title: 'New booking request',
+          message: `${guest.name} asked to stay at ${propertyTitle} from ${fmt(checkIn)} to ${fmt(checkOut)}.`,
+          link: `/host/booking/${bookingIdStr}`,
+          metadata: { bookingId: bookingIdStr, propertyId: dto.propertyId },
+        });
       }
     } catch (notifErr: any) {
       // Non-fatal: the booking is already saved. Log so it's visible in server logs.
@@ -473,9 +421,10 @@ export class BookingsService {
     // ── Trigger refund if applicable ────────────────────────────────────────
     // Runs AFTER the booking is already CANCELLED in the DB, so the cancellation
     // itself always succeeds even if the payment provider is temporarily unavailable.
+    let refundSettled = refundAmount === 0;
     if (refundAmount > 0) {
       try {
-        await this.paymentsService.processBookingRefund(
+        refundSettled = await this.paymentsService.processBookingRefund(
           bookingId,
           refundAmount,
           dto.reason,
@@ -488,6 +437,16 @@ export class BookingsService {
           `cancelBooking: Refund failed for booking ${bookingId}: ${refundErr.message}. ` +
             `Manual refund required.`,
         );
+      }
+    }
+
+    // The stay won't happen, so what the policy leaves the host doesn't need to wait for
+    // check-in. If the refund failed, it stays held until an admin sorts it out.
+    if (refundSettled) {
+      try {
+        await this.hostPayouts.settleNow(bookingId);
+      } catch (payoutErr: any) {
+        this.logger.warn(`cancelBooking: payout not settled for ${bookingId}: ${payoutErr?.message}`);
       }
     }
 
@@ -540,7 +499,7 @@ export class BookingsService {
    */
   async confirmBooking(bookingId: string, dto: RespondToBookingDto, host: User): Promise<Booking> {
     const booking = await this.findBookingOrThrow(bookingId);
-    this.assertIsHost(booking, host);
+    await this.assertIsHost(booking, host);
 
     if (booking.status !== BookingStatus.PENDING) {
       throw new BadRequestException(
@@ -614,7 +573,7 @@ export class BookingsService {
    */
   async rejectBooking(bookingId: string, dto: RespondToBookingDto, host: User): Promise<Booking> {
     const booking = await this.findBookingOrThrow(bookingId);
-    this.assertIsHost(booking, host);
+    await this.assertIsHost(booking, host);
 
     if (booking.status !== BookingStatus.PENDING) {
       throw new BadRequestException('Only PENDING bookings can be rejected');
@@ -657,7 +616,7 @@ export class BookingsService {
    */
   async completeBooking(bookingId: string, host: User): Promise<Booking> {
     const booking = await this.findBookingOrThrow(bookingId);
-    this.assertIsHost(booking, host);
+    await this.assertIsHost(booking, host);
     return this.markCompleted(booking);
   }
 
@@ -743,7 +702,9 @@ export class BookingsService {
    * Host retrieves all bookings for their properties.
    */
   async getHostBookings(hostId: string, query: BookingQueryDto): Promise<PaginatedBookings> {
-    return this.paginateBookings({ hostId: new Types.ObjectId(hostId) }, query);
+    const coHosted = await this.coHosts.propertyIdsFor(hostId);
+    const mine = { hostId: new Types.ObjectId(hostId) };
+    return this.paginateBookings(coHosted.length ? { $or: [mine, { propertyId: { $in: coHosted } }] } : mine, query);
   }
 
   /**
@@ -1079,7 +1040,15 @@ export class BookingsService {
     const isAdmin = user.role === UserRole.ADMIN;
 
     if (!isGuest && !isHost && !isAdmin) {
-      throw new ForbiddenException('You do not have access to this booking');
+      const propertyId = (booking.propertyId as any)?._id ?? booking.propertyId;
+      if (!(await this.coHosts.isActive(user._id, propertyId))) {
+        throw new ForbiddenException('You do not have access to this booking');
+      }
+      // A co-host runs the stay, not the money: the owner's payout stays private.
+      const forCoHost: any = booking.toObject();
+      delete forCoHost.payout;
+      forCoHost.viewerIsCoHost = true;
+      return forCoHost;
     }
 
     return booking;
@@ -1136,6 +1105,121 @@ export class BookingsService {
   // ════════════════════════════════════════════════════════════════════════════
   // PRIVATE HELPERS
   // ════════════════════════════════════════════════════════════════════════════
+
+  /** Rules every stay has to meet, for a new booking or for new dates on an existing one. */
+  private assertStayAllowed(property: any, checkIn: Date, checkOut: Date): { checkIn: Date; checkOut: Date; nights: number } {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (isNaN(checkIn.getTime()) || isNaN(checkOut.getTime())) {
+      throw new BadRequestException('Invalid check-in or check-out date');
+    }
+
+    if (checkIn < today) {
+      throw new BadRequestException('Check-in date cannot be in the past');
+    }
+
+    if (checkOut <= checkIn) {
+      throw new BadRequestException('Check-out must be after check-in');
+    }
+
+    const nights = Math.ceil(
+      (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24),
+    );
+
+    const minNights = (property as any).minNights ?? 1;
+    const maxNights = (property as any).maxNights ?? 365;
+
+    if (nights < minNights) {
+      throw new BadRequestException(
+        `Minimum stay for this property is ${minNights} night(s)`,
+      );
+    }
+
+    if (nights > maxNights) {
+      throw new BadRequestException(
+        `Maximum stay for this property is ${maxNights} night(s)`,
+      );
+    }
+
+    // ── 2b. Advance notice & booking window validation ───────────────────────
+    // The host calendar saves noticeDays / windowMonths; older listings use
+    // advanceNoticeDays / bookingWindowDays. Only the old fields were checked, so the
+    // calendar's settings had no effect. windowMonths null = "Any time".
+    const advanceNoticeDays = Math.max(
+      Number((property as any).noticeDays ?? 0),
+      Number((property as any).advanceNoticeDays ?? 0),
+    );
+    const windowMonths = (property as any).windowMonths;
+    const bookingWindowDays =
+      windowMonths === null
+        ? Number.POSITIVE_INFINITY
+        : typeof windowMonths === 'number' && windowMonths > 0
+          ? Math.round(windowMonths * 30.44)
+          : Number((property as any).bookingWindowDays ?? 365);
+    const daysTilCheckin = Math.ceil(
+      (checkIn.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+    );
+
+    if (daysTilCheckin < advanceNoticeDays) {
+      throw new BadRequestException(
+        `This property requires at least ${advanceNoticeDays} day(s) advance notice before check-in`,
+      );
+    }
+
+    if (daysTilCheckin > bookingWindowDays) {
+      throw new BadRequestException(
+        `Bookings can only be made up to ${bookingWindowDays} day(s) in advance for this property`,
+      );
+    }
+
+    return { checkIn, checkOut, nights };
+  }
+
+  /**
+   * The price of an existing booking on new dates, at today's rates. Throws if the listing
+   * can't take them. Its own booking doesn't count as a conflict.
+   */
+  async quoteStayChange(
+    booking: BookingDocument,
+    checkInRaw: Date,
+    checkOutRaw: Date,
+  ): Promise<{ nights: number; priceBreakdown: BookingPriceBreakdown }> {
+    const property: any = await this.propertyModel.findById(booking.propertyId).exec();
+    if (!property) throw new NotFoundException('Property not found');
+    if (property.approvalStatus !== ApprovalStatus.APPROVED || !property.isActive) {
+      throw new BadRequestException('This property is not available for booking');
+    }
+    const { checkIn, checkOut, nights } = this.assertStayAllowed(property, new Date(checkInRaw), new Date(checkOutRaw));
+
+    const room: any = booking.roomId ? await this.roomsService.getRoomById(String(booking.roomId)) : null;
+    if (room) {
+      await this.roomsService.assertRoomDatesAvailable(String(booking.roomId), checkIn, checkOut, String(booking._id));
+    } else {
+      await this.assertDatesAvailable(String(booking.propertyId), checkIn, checkOut, String(booking._id));
+    }
+
+    const guests = (booking.guests?.adults ?? 1) + (booking.guests?.children ?? 0);
+    const priceBreakdown: any = this.computePrice(property, nights, room, checkIn, guests);
+    const breakfastPrice = Number(room?.breakfastPrice) || 0;
+    if ((booking as any).withBreakfast && breakfastPrice > 0) {
+      const breakfastFee = Math.round(breakfastPrice * guests * nights);
+      priceBreakdown.breakfastFee = breakfastFee;
+      priceBreakdown.totalAmount += breakfastFee;
+    }
+    return { nights, priceBreakdown };
+  }
+
+  /**
+   * New dates cost less. The guest gets back the share the cancellation policy would give
+   * them today, so shortening a stay isn't a way around the policy.
+   */
+  async refundForCheaperStay(booking: BookingDocument, cheaperBy: number): Promise<number> {
+    const total = booking.priceBreakdown.totalAmount;
+    if (!(total > 0)) return 0;
+    const policyRefund = await this.computeRefund(booking, CancelledBy.GUEST);
+    return Math.round(cheaperBy * Math.min(1, policyRefund / total));
+  }
 
   /**
    * Throws ConflictException if the given date range overlaps any confirmed
@@ -1287,7 +1371,10 @@ export class BookingsService {
    */
   private async computeRefund(booking: BookingDocument, cancelledBy: CancelledBy = CancelledBy.GUEST): Promise<number> {
     if (booking.paymentStatus !== PaymentStatus.PAID) return 0;
-    if (cancelledBy !== CancelledBy.GUEST) return booking.priceBreakdown.totalAmount;
+    // What is left of the payments: it can differ from the price after a date change
+    // or an earlier partial refund.
+    const refundable = await this.paymentsService.refundableAmount(booking._id as Types.ObjectId);
+    if (cancelledBy !== CancelledBy.GUEST) return refundable || booking.priceBreakdown.totalAmount;
 
     const property = await this.propertyModel
       .findById(booking.propertyId)
@@ -1296,7 +1383,9 @@ export class BookingsService {
       .exec();
 
     const policy = (property as any)?.cancellationPolicy ?? 'flexible';
-    const paidAmount = booking.priceBreakdown.totalAmount;
+    const paidAmount = refundable
+      ? Math.min(booking.priceBreakdown.totalAmount, refundable)
+      : booking.priceBreakdown.totalAmount;
     const daysUntilCheckin = Math.ceil(
       (booking.checkIn.getTime() - Date.now()) / (1000 * 60 * 60 * 24),
     );
@@ -1387,7 +1476,7 @@ export class BookingsService {
     return booking;
   }
 
-  /** Owner or agent of the property, or an admin. (Co-hosts: add their check here.) */
+  /** Owner, agent or co-host of the property, or an admin. */
   async assertCanManageProperty(propertyId: string, user: User): Promise<void> {
     if (user.role === UserRole.ADMIN) return;
     if (!Types.ObjectId.isValid(propertyId)) throw new BadRequestException('Invalid property ID');
@@ -1396,15 +1485,15 @@ export class BookingsService {
     const uid = user._id.toString();
     const ownerId = (property as any).ownerId?.toString();
     const agentId = (property as any).agentId?.toString();
-    if (ownerId !== uid && agentId !== uid) {
+    if (ownerId !== uid && agentId !== uid && !(await this.coHosts.isActive(uid, propertyId))) {
       throw new ForbiddenException('You do not manage this property');
     }
   }
 
-  private assertIsHost(booking: Booking, user: User): void {
+  private async assertIsHost(booking: Booking, user: User): Promise<void> {
     const isHost = booking.hostId.toString() === user._id.toString();
     const isAdmin = user.role === UserRole.ADMIN;
-    if (!isHost && !isAdmin) {
+    if (!isHost && !isAdmin && !(await this.coHosts.isActive(user._id, booking.propertyId))) {
       throw new ForbiddenException('Only the host or an admin can perform this action');
     }
   }

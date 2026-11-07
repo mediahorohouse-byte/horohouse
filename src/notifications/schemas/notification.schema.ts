@@ -30,6 +30,11 @@ export enum NotificationType {
   // ── NEW: Payment ──────────────────────────────────────────────────────────
   PAYMENT_RECEIVED   = 'payment_received',   // Host: payment confirmed for a booking
   REFUND_PROCESSED   = 'refund_processed',   // Guest: refund has been processed
+  PAYOUT_RELEASED    = 'payout_released',    // Host: held earnings can now be withdrawn
+
+  // ── Stay problems ─────────────────────────────────────────────────────────
+  BOOKING_ISSUE      = 'booking_issue',      // Guest/host: a stay problem was reported or decided
+  BOOKING_DATE_CHANGE = 'booking_date_change', // Guest/host: a date change was asked for or answered
 }
 
 // ─── Schema ───────────────────────────────────────────────────────────────────

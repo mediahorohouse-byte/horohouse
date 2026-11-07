@@ -21,6 +21,18 @@ export enum PaymentStatus {
   PARTIAL = 'partial',     // Partial refund after cancellation
 }
 
+/**
+ * The host's share of a paid booking. It waits in wallet.pendingBalance (not spendable)
+ * until `releaseAt`, about a day after check-in. Bookings paid before this existed have
+ * no `payout`: their money is already in the host's balance.
+ */
+export enum PayoutStatus {
+  HELD = 'held',         // Waiting for releaseAt
+  FROZEN = 'frozen',     // The guest reported a problem: an admin decides
+  RELEASED = 'released', // Moved to the host's withdrawable balance
+  REVERSED = 'reversed', // Fully refunded to the guest
+}
+
 export enum CancellationPolicy {
   FLEXIBLE = 'flexible',   // Full refund up to 24h before check-in
   MODERATE = 'moderate',   // Full refund up to 5 days before check-in
@@ -59,6 +71,14 @@ export interface BookingPriceBreakdown {
   extraGuestFee?: number;
   /** Hotels: breakfast × guests × nights, added to the total (not discounted) */
   breakfastFee?: number;
+}
+
+export interface BookingPayout {
+  status: PayoutStatus;
+  /** XAF still owed to the host (goes down when the guest gets a partial refund) */
+  amount: number;
+  releaseAt: Date;
+  releasedAt?: Date;
 }
 
 export interface BookingCancellation {
@@ -218,6 +238,23 @@ export class Booking {
   })
   cancellation?: BookingCancellation;
 
+  // ── Host payout ──────────────────────────────────────────────────────────
+
+  @Prop({
+    type: {
+      status: { type: String, enum: Object.values(PayoutStatus) },
+      amount: { type: Number },
+      releaseAt: { type: Date },
+      releasedAt: { type: Date },
+    },
+    default: undefined,
+  })
+  payout?: BookingPayout;
+
+  /** Partial refund given for a stay problem (the booking stays paid and goes on) */
+  @Prop()
+  issueRefundAmount?: number;
+
   // ── Check-in / Check-out tracking ────────────────────────────────────────
 
   @Prop()
@@ -254,6 +291,10 @@ BookingSchema.index({ hostId: 1, status: 1, createdAt: -1 });
 
 // Automated jobs (e.g. auto-cancel unpaid after X hours)
 BookingSchema.index({ status: 1, paymentStatus: 1, createdAt: 1 });
+
+// Indexes for the payout release job and the host's held list
+BookingSchema.index({ 'payout.status': 1, 'payout.releaseAt': 1 });
+BookingSchema.index({ hostId: 1, 'payout.status': 1 });
 
 // Index for auto-cancellation queries
 BookingSchema.index({ status: 1, expiresAt: 1 });

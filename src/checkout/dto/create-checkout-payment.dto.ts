@@ -4,8 +4,13 @@ import type { CheckoutMethod, CheckoutPurpose, MomoOperator } from '../schemas/c
 export class CreateCheckoutPaymentDto {
   /** What is being paid. Omitted = booking (older app versions). */
   @IsOptional()
-  @IsIn(['booking', 'subscription', 'boost'])
+  @IsIn(['booking', 'subscription', 'boost', 'date_change'])
   purpose?: CheckoutPurpose;
+
+  // ── Date change: the price difference ───────────────────────────────────
+  @ValidateIf((o: CreateCheckoutPaymentDto) => o.purpose === 'date_change')
+  @IsMongoId()
+  changeId?: string;
 
   @ValidateIf((o: CreateCheckoutPaymentDto) => !o.purpose || o.purpose === 'booking')
   @IsMongoId()
@@ -58,8 +63,12 @@ export class CreateCheckoutPaymentDto {
 
 /** POST /checkout/quote — what a subscription / boost costs and which ways to pay apply */
 export class CheckoutQuoteQueryDto {
-  @IsIn(['subscription', 'boost'])
-  purpose!: 'subscription' | 'boost';
+  @IsIn(['subscription', 'boost', 'date_change'])
+  purpose!: 'subscription' | 'boost' | 'date_change';
+
+  @ValidateIf((o: CheckoutQuoteQueryDto) => o.purpose === 'date_change')
+  @IsMongoId()
+  changeId?: string;
 
   @ValidateIf((o: CheckoutQuoteQueryDto) => o.purpose === 'subscription')
   @IsString()
