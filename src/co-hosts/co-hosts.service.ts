@@ -57,7 +57,7 @@ export class CoHostsService {
   /** Copies a notice to a listing's co-hosts. Never fails the action it's reporting. */
   async notifyCoHosts(
     propertyId: unknown,
-    params: { type?: NotificationType; title: string; message: string; link: string; metadata?: Record<string, any> },
+    params: { type?: NotificationType; title: string; message: string; fr?: { title: string; message: string }; link: string; metadata?: Record<string, any> },
   ): Promise<void> {
     try {
       const rows = await this.coHostModel
@@ -105,6 +105,7 @@ export class CoHostsService {
     await this.notify(inviteeId, {
       title: 'You’re invited to co-host',
       message: `You’ve been invited to help run ${(property as any).title ?? 'a listing'}.`,
+      fr: { title: 'Vous êtes invité à co-gérer une annonce', message: `Vous êtes invité à aider à gérer ${(property as any).title ?? 'une annonce'}.` },
       link: '/host/co-hosts',
       metadata: { propertyId: String(property._id) },
     });
@@ -144,6 +145,7 @@ export class CoHostsService {
     await this.notify(leaving ? String(row.invitedBy) : String(row.userId), {
       title: leaving ? 'A co-host left' : 'You’re no longer a co-host',
       message: leaving ? `A co-host stopped helping with ${title}.` : `You no longer help run ${title}.`,
+      fr: { title: leaving ? 'Un co-hôte est parti' : "Vous n'êtes plus co-hôte", message: leaving ? `Un co-hôte a cessé d'aider avec ${property?.title ?? 'une annonce'}.` : `Vous n'aidez plus à gérer ${property?.title ?? 'une annonce'}.` },
       link: '/host/co-hosts',
       metadata: { propertyId: String(row.propertyId) },
     });
@@ -180,6 +182,7 @@ export class CoHostsService {
     await this.notify(String(row.invitedBy), {
       title: accept ? 'Your co-host accepted' : 'Your co-host invitation was declined',
       message: `${accept ? 'They can now help run' : 'They won’t be helping with'} ${property?.title ?? 'your listing'}.`,
+      fr: { title: accept ? 'Votre co-hôte a accepté' : 'Votre invitation de co-hôte a été refusée', message: `${accept ? 'Cette personne peut maintenant aider à gérer' : "Cette personne n'aidera pas avec"} ${property?.title ?? 'votre annonce'}.` },
       link: '/host/co-hosts',
       metadata: { propertyId: String(row.propertyId) },
     });
@@ -227,7 +230,7 @@ export class CoHostsService {
     return row;
   }
 
-  private async notify(userId: string, params: { title: string; message: string; link: string; metadata: Record<string, any> }) {
+  private async notify(userId: string, params: { title: string; message: string; fr?: { title: string; message: string }; link: string; metadata: Record<string, any> }) {
     try {
       await this.notifications.create({ userId, type: NotificationType.SYSTEM, ...params } as any);
     } catch (err: any) {

@@ -50,4 +50,9 @@ export class CreateNotificationDto {
     currency?: string;
     [key: string]: any;
   };
+
+  /** The same notification in French, used when the recipient's app is in French. Never saved. */
+  @IsObject()
+  @IsOptional()
+  fr?: { title: string; message: string };
 }

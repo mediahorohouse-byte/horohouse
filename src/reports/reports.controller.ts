@@ -3,6 +3,7 @@ import {
     UseGuards, Query, Req,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import { IsString, Length } from 'class-validator';
 import { ReportsService } from './reports.service';
 import { CreateReportDto } from './dto/create-report.dto';
 import { UpdateReportStatusDto } from './dto/update-report-status.dto';
@@ -11,6 +12,10 @@ import { JwtAuthGuard } from '../auth/guards/jwt.auth.guard';
 import { RolesGuard, Roles } from '../auth/guards/roles.guard';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { UserRole } from '../users/schemas/user.schema';
+
+class HideListingDto {
+    @IsString() @Length(3, 500) reason: string;
+}
 
 @ApiTags('reports')
 @Controller('reports')
@@ -103,6 +108,17 @@ export class ReportsController {
         @Req() req: any,
     ) {
         return this.reportsService.deleteReportedProperty(id, req.user);
+    }
+
+    // ── Admin: hide the reported property (reversible) ────────────────────────
+
+    @Post(':id/hide-listing')
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles(UserRole.ADMIN)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Take the reported listing off the platform and close its open reports (Admin only)' })
+    hideListing(@Param('id') id: string, @Body() dto: HideListingDto, @Req() req: any) {
+        return this.reportsService.hideListing(id, dto.reason, req.user);
     }
 
     // ── Admin: send warning email to property owner ───────────────────────────

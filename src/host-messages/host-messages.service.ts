@@ -526,6 +526,7 @@ export class HostMessagesService {
           type: NotificationType.BOOKING_REMINDER,
           title: 'Your check-in guide is ready 🔑',
           message: `Wi-Fi, directions and how to get in at ${p?.title ?? 'your stay'}.`,
+          fr: { title: "Votre guide d'arrivée est prêt 🔑", message: `Wi-Fi, itinéraire et accès à ${p?.title ?? 'votre logement'}.` },
           link: `/bookings/${idStr(b._id)}`,
           metadata: { bookingId: idStr(b._id), kind: 'check_in_guide' },
         } as any)

@@ -1033,6 +1033,7 @@ async reconcileTransaction(transaction: TransactionDocument): Promise<'success' 
         await this.coHosts.notifyCoHosts((booking.propertyId as any)?._id ?? booking.propertyId, {
           title: 'New booking',
           message: `${(guest as any)?.name ?? 'A guest'} booked ${propertyTitle} from ${fmt(booking.checkIn)} to ${fmt(booking.checkOut)}.`,
+          fr: { title: 'Nouvelle réservation', message: `${(guest as any)?.name ?? 'Un voyageur'} a réservé ${propertyTitle} du ${fmt(booking.checkIn)} au ${fmt(booking.checkOut)}.` },
           link: `/host/booking/${booking._id}`,
           metadata: { bookingId: booking._id.toString() },
         });

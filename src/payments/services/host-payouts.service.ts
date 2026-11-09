@@ -206,7 +206,10 @@ export class HostPayoutsService {
         message: `${amount} ${claimed.currency ?? 'XAF'} from your booking at ${title} can now be withdrawn.`,
         link: '/host/withdraw',
         metadata: { bookingId, amount },
-      } as any);
+      } as any, {
+        title: 'Vos revenus sont disponibles',
+        message: `${amount} ${claimed.currency ?? 'XAF'} de votre réservation à ${title} peuvent maintenant être retirés.`,
+      });
     } catch (err: any) {
       this.logger.warn(`release: notification failed for ${bookingId}: ${err?.message}`);
     }

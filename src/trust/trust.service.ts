@@ -178,6 +178,7 @@ export class TrustService {
         message: approve
           ? 'Hosts now see a verified badge on your profile.'
           : `Reason: ${reason!.trim().slice(0, 200)}. You can upload a new photo.`,
+        fr: { title: approve ? 'Votre identité est vérifiée ✅' : "Nous n'avons pas pu vérifier votre pièce d'identité", message: approve ? 'Les hôtes voient maintenant un badge vérifié sur votre profil.' : `Motif : ${reason!.trim().slice(0, 200)}. Vous pouvez envoyer une nouvelle photo.` },
         link: '/profile/verify-identity',
       } as any)
       .catch((e: any) => this.logger.warn(`identity notification failed: ${e?.message}`));

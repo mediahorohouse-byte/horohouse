@@ -121,6 +121,7 @@ export class NotificationsScheduler {
             type: NotificationType.REVIEW_REQUEST,
             title: 'How was your stay?',
             message: `Share your experience at ${propertyTitle} — your review helps other travellers.`,
+            fr: { title: "Comment s'est passé votre séjour ?", message: `Racontez votre séjour à ${propertyTitle} : votre avis aide les autres voyageurs.` },
             link: `/bookings/${bookingId}/review`,
             metadata: {
               bookingId,
@@ -137,6 +138,7 @@ export class NotificationsScheduler {
             type: NotificationType.REVIEW_REQUEST,
             title: 'Review your guest',
             message: `How was ${property?.guestName ?? 'your guest'} as a guest? Leave a review to help other hosts.`,
+            fr: { title: 'Évaluez votre voyageur', message: `Comment s'est passé le séjour avec ${property?.guestName ?? 'votre voyageur'} ? Laissez un avis pour aider les autres hôtes.` },
             link: `/hosting/bookings/${bookingId}/review`,
             metadata: {
               bookingId,

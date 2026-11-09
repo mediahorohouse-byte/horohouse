@@ -13,6 +13,8 @@ import { Review, ReviewDocument, ReviewType, ReviewerRole } from './schemas/revi
 import { User, UserRole, UserDocument } from '../users/schemas/user.schema';
 import { Property, PropertyDocument } from '../properties/schemas/property.schema';
 import { Booking, BookingDocument, BookingStatus } from '../bookings/schema/booking.schema';
+import { Appointment, AppointmentDocument, AppointmentStatus } from '../appointments/schemas/appointment.schema';
+import { DigitalLease, DigitalLeaseDocument, LeaseStatus } from '../digital-lease/schemas/digital-lease.schema';
 import { CreateReviewDto, UpdateReviewDto, RespondReviewDto } from './dto';
 
 // ─── How many days after checkout guests/hosts can still leave a review ───────
@@ -50,6 +52,8 @@ export class ReviewsService {
     @InjectModel(Property.name) private propertyModel: Model<PropertyDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(Booking.name) private bookingModel: Model<BookingDocument>,
+    @InjectModel(Appointment.name) private appointmentModel: Model<AppointmentDocument>,
+    @InjectModel(DigitalLease.name) private leaseModel: Model<DigitalLeaseDocument>,
   ) { }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -66,6 +70,10 @@ export class ReviewsService {
       }
       if (reviewType === ReviewType.INSIGHT) {
         return this.createInsightReview(createReviewDto, user);
+      }
+
+      if (reviewType === ReviewType.PROPERTY) {
+        return this.createPropertyReviewFromStay(createReviewDto, user);
       }
 
       // ── Existing: property and agent reviews ─────────────────────────────
@@ -118,6 +126,40 @@ export class ReviewsService {
     return saved;
   }
 
+  // ─── Property review: only from a real stay ──────────────────────────────────
+
+  /**
+   * reviewType = property used to skip every check: anyone signed in could post one, and it
+   * went public at once. It now becomes the stay review of this guest's latest completed
+   * booking, so it follows the same rules (one per booking, 14 days, hidden until both
+   * sides have reviewed). App versions still sending it keep working for real guests.
+   */
+  private async createPropertyReviewFromStay(dto: CreateReviewDto, user: User): Promise<Review> {
+    if (!dto.propertyId) throw new BadRequestException('propertyId is required for property reviews');
+    if (!Types.ObjectId.isValid(dto.propertyId)) throw new BadRequestException('Invalid property ID');
+
+    const stays = await this.bookingModel
+      .find({ guestId: user._id, propertyId: new Types.ObjectId(dto.propertyId), status: BookingStatus.COMPLETED })
+      .select('checkOut actualCheckOut guestReviewLeft')
+      .sort({ checkOut: -1 })
+      .limit(20)
+      .lean()
+      .exec();
+    if (!stays.length) throw new ForbiddenException('You can review a place after you have stayed there');
+
+    const now = Date.now();
+    const open = stays.find((stay: any) => {
+      const checkout = new Date(stay.actualCheckOut ?? stay.checkOut).getTime();
+      return !stay.guestReviewLeft && Math.floor((now - checkout) / 86_400_000) <= REVIEW_WINDOW_DAYS;
+    });
+    if (!open) throw new BadRequestException('You have already reviewed your stays here, or the time to review has passed');
+
+    return this.createBookingReview(
+      { ...dto, reviewType: ReviewType.STAY, bookingId: String((open as any)._id), propertyId: undefined } as CreateReviewDto,
+      user,
+    );
+  }
+
   // ─── Standard review (existing logic, unchanged) ──────────────────────────
 
   private async createStandardReview(
@@ -155,6 +197,15 @@ export class ReviewsService {
         isActive: true,
       });
       if (!agent) throw new NotFoundException('Agent not found');
+      if (String(agent._id) === String(user._id)) {
+        throw new ForbiddenException('You cannot review yourself');
+      }
+      // Anyone signed in used to be able to rate any agent. Now only people who actually
+      // dealt with them can: a completed stay at one of their listings, a viewing they
+      // held with you, or a lease you signed with them.
+      if (!(await this.hasDealtWith(user._id as Types.ObjectId, agent._id as Types.ObjectId))) {
+        throw new ForbiddenException('You can review an agent after a stay, a viewing or a lease with them');
+      }
     }
 
     const review = new this.reviewModel({
@@ -168,7 +219,8 @@ export class ReviewsService {
       comment: dto.comment,
       images: dto.images ?? [],
       verified: true,
-      bookingVerified: false,
+      // Agent reviews are only possible after a real dealing (see hasDealtWith).
+      bookingVerified: dto.reviewType === ReviewType.AGENT,
       isPublished: true,   // standard reviews are immediately visible
     });
 
@@ -180,6 +232,20 @@ export class ReviewsService {
 
     this.logger.log(`Standard review created: ${saved._id} by user ${user._id}`);
     return saved;
+  }
+
+  /** Has this person really dealt with the agent? Counts only finished or signed dealings. */
+  async hasDealtWith(userId: Types.ObjectId, agentId: Types.ObjectId): Promise<boolean> {
+    const [stay, viewing, lease] = await Promise.all([
+      this.bookingModel.exists({ guestId: userId, hostId: agentId, status: BookingStatus.COMPLETED }),
+      this.appointmentModel.exists({ agentId, clientId: userId, status: AppointmentStatus.COMPLETED }),
+      this.leaseModel.exists({
+        landlordUserId: agentId,
+        'tenants.tenantUserId': userId,
+        status: { $in: [LeaseStatus.ACTIVE, LeaseStatus.EXPIRED, LeaseStatus.TERMINATED] },
+      }),
+    ]);
+    return !!(stay || viewing || lease);
   }
 
   // ─── Booking review (STAY or GUEST) ──────────────────────────────────────

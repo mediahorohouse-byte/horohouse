@@ -346,6 +346,7 @@ export class BookingsService {
         await this.coHosts.notifyCoHosts(dto.propertyId, {
           title: 'New booking request',
           message: `${guest.name} asked to stay at ${propertyTitle} from ${fmt(checkIn)} to ${fmt(checkOut)}.`,
+          fr: { title: 'Nouvelle demande de réservation', message: `${guest.name} souhaite séjourner à ${propertyTitle} du ${fmt(checkIn)} au ${fmt(checkOut)}.` },
           link: `/host/booking/${bookingIdStr}`,
           metadata: { bookingId: bookingIdStr, propertyId: dto.propertyId },
         });

@@ -531,6 +531,7 @@ export class StudentProfilesService {
       message: isApproved
         ? 'Your student ID has been approved. You now have full access to roommate matching and student-verified listings.'
         : `Your student ID was not approved. Reason: ${rejectionReason}. Please upload a valid document.`,
+      fr: { title: isApproved ? 'Carte étudiante vérifiée !' : 'Mise à jour de votre carte étudiante', message: isApproved ? 'Votre carte étudiante a été approuvée. Vous avez maintenant accès à la colocation et aux logements vérifiés pour étudiants.' : `Votre carte étudiante n'a pas été approuvée. Motif : ${rejectionReason}. Veuillez envoyer un document valide.` },
       metadata: { action: 'student_id_review_result', decision },
     });
   }

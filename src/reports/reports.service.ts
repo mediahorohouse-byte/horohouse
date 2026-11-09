@@ -4,7 +4,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types, isValidObjectId } from 'mongoose';
 import { Report, ReportDocument } from './schemas/report.schema';
-import { Property, PropertyDocument } from '../properties/schemas/property.schema';
+import { ApprovalStatus, Property, PropertyDocument } from '../properties/schemas/property.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { CreateReportDto } from './dto/create-report.dto';
 import { UpdateReportStatusDto } from './dto/update-report-status.dto';
@@ -12,6 +12,8 @@ import { SendWarningDto, WarningSeverity } from './dto/send-warning.dto';
 import { EmailService } from '../email/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/schemas/notification.schema';
+
+const OPEN_STATUSES = ['pending', 'reviewed'];
 
 @Injectable()
 export class ReportsService {
@@ -59,6 +61,7 @@ export class ReportsService {
             await this.notificationsService.notifyAdmins({
                 title: 'Listing reported',
                 message: `${property.title ?? 'A listing'} was reported: ${createReportDto.reason}.`,
+                link: '/admin/reports',
                 metadata: { propertyId: String(propertyId), reportId: String((saved as any)._id) },
             });
         } catch (err: any) {
@@ -71,27 +74,52 @@ export class ReportsService {
 
     async findAll(
         query: any,
-    ): Promise<{ data: Report[]; total: number; page: number; limit: number }> {
-        const { page = 1, limit = 10, status, propertyId } = query;
+    ): Promise<{ data: any[]; total: number; openCount: number; page: number; limit: number }> {
+        const { status, propertyId, state } = query;
+        const page = Math.max(1, Number(query.page) || 1);
+        const limit = Math.min(100, Math.max(1, Number(query.limit) || 10));
         const skip = (page - 1) * limit;
 
         const filter: any = {};
-        if (status) filter.status = status;
+        if (state === 'open') filter.status = { $in: OPEN_STATUSES };
+        else if (state === 'closed') filter.status = { $in: ['resolved', 'dismissed'] };
+        else if (status) filter.status = status;
         if (propertyId) filter.property = propertyId;
 
-        const [data, total] = await Promise.all([
+        const [reports, total, openCount] = await Promise.all([
             this.reportModel
                 .find(filter)
-                .populate('reporter', 'firstName lastName email profilePicture')
-                .populate('property', 'title location currentPrice images')
-                .sort({ createdAt: -1 })
+                .populate('reporter', 'name email phoneNumber profilePicture')
+                .populate({
+                    path: 'property',
+                    select: 'title city address images approvalStatus isActive ownerId',
+                    populate: { path: 'ownerId', select: 'name email phoneNumber' },
+                })
+                // The queue is worked oldest first; everything else reads newest first.
+                .sort({ createdAt: state === 'open' ? 1 : -1 })
                 .skip(skip)
-                .limit(Number(limit))
+                .limit(limit)
+                .lean()
                 .exec(),
             this.reportModel.countDocuments(filter).exec(),
+            this.reportModel.countDocuments({ status: { $in: OPEN_STATUSES } }).exec(),
         ]);
 
-        return { data, total, page: Number(page), limit: Number(limit) };
+        // Several people reporting one listing is worth knowing when deciding.
+        const propertyIds = reports.map((r: any) => r.property?._id).filter(Boolean);
+        const counts: { _id: any; count: number }[] = propertyIds.length
+            ? await this.reportModel.aggregate([
+                { $match: { property: { $in: propertyIds }, status: { $in: OPEN_STATUSES } } },
+                { $group: { _id: '$property', count: { $sum: 1 } } },
+            ])
+            : [];
+        const countById = new Map(counts.map((c) => [String(c._id), c.count]));
+        const data = reports.map((r: any) => ({
+            ...r,
+            openOnListing: r.property?._id ? countById.get(String(r.property._id)) ?? 0 : 0,
+        }));
+
+        return { data, total, openCount, page, limit };
     }
 
     // ── Detail ────────────────────────────────────────────────────────────────
@@ -99,11 +127,11 @@ export class ReportsService {
     async findOne(id: string): Promise<Report> {
         const report = await this.reportModel
             .findById(id)
-            .populate('reporter', 'firstName lastName email profilePicture phoneNumber')
+            .populate('reporter', 'name email profilePicture phoneNumber')
             .populate({
                 path: 'property',
-                select: 'title description location address city currentPrice images status ownerId',
-                populate: { path: 'ownerId', select: 'firstName lastName email name' },
+                select: 'title description address city price images approvalStatus isActive ownerId',
+                populate: { path: 'ownerId', select: 'name email phoneNumber' },
             })
             .exec();
 
@@ -116,16 +144,67 @@ export class ReportsService {
     // ── Update status ─────────────────────────────────────────────────────────
 
     async updateStatus(id: string, updateDto: UpdateReportStatusDto): Promise<Report> {
+        const before = isValidObjectId(id)
+            ? await this.reportModel.findById(id).select('status').lean().exec()
+            : null;
         const report = await this.reportModel
             .findByIdAndUpdate(id, updateDto, { new: true })
-            .populate('reporter', 'firstName lastName email profilePicture')
-            .populate('property', 'title location')
+            .populate('reporter', 'name email profilePicture')
+            .populate('property', 'title city')
             .exec();
 
         if (!report) {
             throw new NotFoundException(`Report with ID ${id} not found`);
         }
+        // Closing an open report: tell the person who sent it.
+        const closedNow = OPEN_STATUSES.includes(String(before?.status)) && ['resolved', 'dismissed'].includes(report.status);
+        if (closedNow) {
+            const reporterId = (report.reporter as any)?._id ?? report.reporter;
+            await this.notifyReporters(
+                [reporterId],
+                (report.property as any)?.title,
+                report.status === 'dismissed' ? 'dismissed' : 'resolved',
+            );
+        }
         return report;
+    }
+
+    /**
+     * Lets the people who reported a listing know what came of it. Only the outcome: what
+     * was reported and by whom stays private, and the owner is told separately.
+     */
+    private async notifyReporters(
+        reporterIds: any[],
+        propertyTitle: string | undefined,
+        outcome: 'removed' | 'resolved' | 'dismissed',
+    ): Promise<void> {
+        const ids = [...new Set(reporterIds.filter(Boolean).map(String))];
+        const listing = propertyTitle ? `"${propertyTitle}"` : 'the listing';
+        const annonce = propertyTitle ? `« ${propertyTitle} »` : "l'annonce";
+        const text = {
+            removed: {
+                en: { title: 'Thanks for your report', message: `We reviewed your report about ${listing} and took it off HoroHouse.` },
+                fr: { title: 'Merci pour votre signalement', message: `Nous avons examiné votre signalement concernant ${annonce} et l'avons retirée de HoroHouse.` },
+            },
+            resolved: {
+                en: { title: 'Thanks for your report', message: `We reviewed your report about ${listing} and dealt with it.` },
+                fr: { title: 'Merci pour votre signalement', message: `Nous avons examiné votre signalement concernant ${annonce} et l'avons traité.` },
+            },
+            dismissed: {
+                en: { title: 'We reviewed your report', message: `We looked into your report about ${listing} and found it follows our rules, so it stays up. Thanks for helping keep HoroHouse safe.` },
+                fr: { title: 'Nous avons examiné votre signalement', message: `Nous avons vérifié votre signalement concernant ${annonce} : elle respecte nos règles et reste en ligne. Merci de nous aider à garder HoroHouse sûr.` },
+            },
+        }[outcome];
+        for (const userId of ids) {
+            try {
+                await this.notificationsService.create(
+                    { userId, type: NotificationType.SYSTEM, title: text.en.title, message: text.en.message, metadata: { outcome } },
+                    text.fr,
+                );
+            } catch (err: any) {
+                this.logger.warn(`Reporter ${userId} wasn't told the outcome: ${err?.message}`);
+            }
+        }
     }
 
     // ── Delete report record ──────────────────────────────────────────────────
@@ -189,11 +268,18 @@ export class ReportsService {
             `Property ${propertyId} ("${propertyTitle}") deleted by admin ${(admin as any)._id} via report ${reportId}`,
         );
 
-        // 3. Resolve all open reports on this property
+        // 3. Resolve all open reports on this property, and tell those who sent them
+        const openReports = await this.reportModel
+            .find({ property: propertyId, status: { $in: ['pending', 'reviewed'] } })
+            .select('reporter')
+            .lean()
+            .exec();
         await this.reportModel.updateMany(
             { property: propertyId, status: { $in: ['pending', 'reviewed'] } },
             { status: 'resolved', adminNotes: `Property deleted by admin on ${new Date().toLocaleDateString()}` },
         );
+
+        await this.notifyReporters(openReports.map((x: any) => x.reporter), propertyTitle, 'removed');
 
         // 4. Notify the property owner in-app (non-blocking)
         if (owner?._id) {
@@ -204,6 +290,7 @@ export class ReportsService {
                     type: NotificationType.SYSTEM,
                     title: 'Your property has been removed',
                     message: `Your listing "${propertyTitle}" has been removed from the platform following a report review by our admin team. If you believe this is a mistake, please contact support.`,
+                    fr: { title: 'Votre logement a été retiré', message: `Votre annonce « ${propertyTitle} » a été retirée de la plateforme après examen d'un signalement par notre équipe. Si vous pensez qu'il s'agit d'une erreur, contactez le support.` },
                     link: '/dashboard',
                     metadata: { propertyTitle },
                 })
@@ -224,6 +311,60 @@ export class ReportsService {
         }
 
         return { message: `Property "${propertyTitle}" has been permanently deleted.` };
+    }
+
+    // ── Hide the reported property ───────────────────────────────────────────────
+
+    /**
+     * Takes the listing off the platform without destroying anything, by rejecting it.
+     * Unlike isActive alone, an owner can't undo this: only an admin can approve it again,
+     * from Properties Moderation. Existing bookings are left alone.
+     */
+    async hideListing(reportId: string, reason: string, admin: User): Promise<{ message: string }> {
+        if (!isValidObjectId(reportId)) throw new NotFoundException('Report not found');
+        const report = await this.reportModel.findById(reportId).select('property').lean().exec();
+        if (!report) throw new NotFoundException('Report not found');
+
+        const property: any = await this.propertyModel
+            .findByIdAndUpdate(
+                report.property,
+                { approvalStatus: ApprovalStatus.REJECTED, isActive: false, rejectionReason: reason },
+            )
+            .select('title ownerId')
+            .lean()
+            .exec();
+        if (!property) throw new BadRequestException('This listing no longer exists.');
+
+        // Every open report on it has now been dealt with.
+        const openReports = await this.reportModel
+            .find({ property: property._id, status: { $in: OPEN_STATUSES } })
+            .select('reporter')
+            .lean()
+            .exec();
+        await this.reportModel.updateMany(
+            { property: property._id, status: { $in: OPEN_STATUSES } },
+            { status: 'resolved', adminNotes: `Listing hidden: ${reason}` },
+        );
+        await this.notifyReporters(openReports.map((x: any) => x.reporter), property.title, 'removed');
+        this.logger.log(`Listing ${property._id} hidden by admin ${(admin as any)._id} via report ${reportId}`);
+
+        if (property.ownerId) {
+            try {
+                await this.notificationsService.create({
+                    userId: String(property.ownerId),
+                    type: NotificationType.SYSTEM,
+                    title: 'Your listing has been hidden',
+                    message: `"${property.title ?? 'Your listing'}" was hidden after a report: ${reason}`,
+                    metadata: { propertyId: String(property._id), reportId },
+                }, {
+                    title: 'Votre annonce a été masquée',
+                    message: `« ${property.title ?? 'Votre annonce'} » a été masquée suite à un signalement : ${reason}`,
+                });
+            } catch (err: any) {
+                this.logger.warn(`Listing ${property._id} hidden, but the owner wasn't notified: ${err?.message}`);
+            }
+        }
+        return { message: `"${property.title ?? 'The listing'}" is hidden.` };
     }
 
     // ── NEW: Send warning to property owner ───────────────────────────────────
@@ -284,6 +425,7 @@ export class ReportsService {
             type: NotificationType.SYSTEM,
             title: notifTitle,
             message: `Regarding your property "${propertyTitle}": ${dto.message}`,
+            fr: { title: isFinal ? '⚠️ Dernier avertissement : action requise sur votre annonce' : '⚠️ Avertissement concernant votre annonce', message: `Concernant votre logement « ${propertyTitle} » : ${dto.message}` },
             link: `/dashboard/properties`,
             metadata: {
                 propertyTitle,

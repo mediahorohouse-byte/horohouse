@@ -7,6 +7,8 @@ import { Review, ReviewSchema } from './schemas/review.schema';
 import { Property, PropertySchema } from '../properties/schemas/property.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
 import { Booking, BookingSchema } from '../bookings/schema/booking.schema';
+import { Appointment, AppointmentSchema } from '../appointments/schemas/appointment.schema';
+import { DigitalLease, DigitalLeaseSchema } from '../digital-lease/schemas/digital-lease.schema';
 
 @Module({
   imports: [
@@ -15,6 +17,8 @@ import { Booking, BookingSchema } from '../bookings/schema/booking.schema';
       { name: Property.name, schema: PropertySchema },
       { name: User.name, schema: UserSchema },
       { name: Booking.name, schema: BookingSchema },
+      { name: Appointment.name, schema: AppointmentSchema },
+      { name: DigitalLease.name, schema: DigitalLeaseSchema },
     ]),
   ],
   controllers: [ReviewsController],

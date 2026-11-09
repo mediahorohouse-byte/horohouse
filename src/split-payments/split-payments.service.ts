@@ -289,6 +289,7 @@ export class SplitPaymentsService {
         type: NotificationType.PAYMENT_RECEIVED,
         title: 'All tenants have paid!',
         message: `Full rent of ${cycle.totalRent.toLocaleString()} XAF collected for ${cycle.cycleLabel}. Ready for disbursement.`,
+        fr: { title: 'Tous les locataires ont payé !', message: `Loyer complet de ${cycle.totalRent.toLocaleString('fr-FR')} XAF encaissé pour ${cycle.cycleLabel}. Prêt pour le versement.` },
         metadata: {
           cycleId: (cycle._id as Types.ObjectId).toString(),
           amount: cycle.totalRent,
@@ -431,6 +432,7 @@ export class SplitPaymentsService {
       type: NotificationType.PAYMENT_RECEIVED,
       title: 'Rent disbursed',
       message: `${cycle.totalRent.toLocaleString()} XAF for ${cycle.cycleLabel} has been sent to your account.`,
+      fr: { title: 'Loyer versé', message: `${cycle.totalRent.toLocaleString('fr-FR')} XAF pour ${cycle.cycleLabel} ont été envoyés sur votre compte.` },
       metadata: {
         cycleId,
         amount: cycle.totalRent,
@@ -482,6 +484,7 @@ export class SplitPaymentsService {
             type: NotificationType.SYSTEM,
             title: 'Rent payment overdue',
             message: `Your rent share of ${share.amountDue.toLocaleString()} XAF for ${cycle.cycleLabel} is now overdue.`,
+            fr: { title: 'Loyer en retard', message: `Votre part de loyer de ${share.amountDue.toLocaleString('fr-FR')} XAF pour ${cycle.cycleLabel} est maintenant en retard.` },
             metadata: {
               cycleId: (cycle._id as Types.ObjectId).toString(),
               amount: share.amountDue,
@@ -536,6 +539,7 @@ export class SplitPaymentsService {
           type: NotificationType.SYSTEM,
           title: `Rent due — ${cycle.cycleLabel}`,
           message: `Your share of ${share.amountDue.toLocaleString()} XAF is due by ${share.dueDate.toLocaleDateString()}.`,
+          fr: { title: `Loyer à payer — ${cycle.cycleLabel}`, message: `Votre part de ${share.amountDue.toLocaleString('fr-FR')} XAF est à payer avant le ${share.dueDate.toLocaleDateString('fr-FR')}.` },
           metadata: {
             cycleId: (cycle._id as Types.ObjectId).toString(),
             amount: share.amountDue,

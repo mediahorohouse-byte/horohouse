@@ -129,6 +129,7 @@ export class BookingChangesService {
     await this.notify(String(booking.hostId), {
       title: 'A guest wants to change their dates',
       message: `They’d like to stay ${day(quote.checkIn)} to ${day(quote.checkOut)} instead. Accept or decline within 48 hours.`,
+      fr: { title: 'Un voyageur souhaite changer ses dates', message: `Il souhaite séjourner du ${day(quote.checkIn)} au ${day(quote.checkOut)} à la place. Acceptez ou refusez sous 48 heures.` },
       link: `/host/booking/${booking._id}`,
       metadata: { bookingId: String(booking._id), propertyId: String(booking.propertyId) },
     });
@@ -136,6 +137,7 @@ export class BookingChangesService {
       type: NotificationType.BOOKING_DATE_CHANGE,
       title: 'A guest wants to change their dates',
       message: `They’d like to stay ${day(quote.checkIn)} to ${day(quote.checkOut)} instead.`,
+      fr: { title: 'Un voyageur souhaite changer ses dates', message: `Il souhaite séjourner du ${day(quote.checkIn)} au ${day(quote.checkOut)} à la place.` },
       link: `/host/booking/${booking._id}`,
       metadata: { bookingId: String(booking._id), propertyId: String(booking.propertyId) },
     });
@@ -151,6 +153,7 @@ export class BookingChangesService {
       await this.notify(String(change.hostId), {
         title: 'Date change withdrawn',
         message: 'The guest withdrew their request. The booking keeps its original dates.',
+        fr: { title: 'Changement de dates retiré', message: 'Le voyageur a retiré sa demande. La réservation garde ses dates initiales.' },
         link: `/host/booking/${change.bookingId}`,
         metadata: { bookingId: String(change.bookingId) },
       });
@@ -200,6 +203,7 @@ export class BookingChangesService {
       await this.notify(String(change.guestId), {
         title: 'Your host accepted the new dates',
         message: `Pay the ${change.amountDue} ${booking.currency ?? 'XAF'} difference within 24 hours to confirm them.`,
+        fr: { title: 'Votre hôte a accepté les nouvelles dates', message: `Payez la différence de ${change.amountDue} ${booking.currency ?? 'XAF'} sous 24 heures pour les confirmer.` },
         link: `/booking/${booking._id}`,
         metadata: { bookingId: String(booking._id), propertyId: String(booking.propertyId) },
       });
@@ -245,6 +249,7 @@ export class BookingChangesService {
     await this.notify(String(change.guestId), {
       title: 'Your host declined the new dates',
       message: `Your booking keeps its original dates.${reason ? ` ${reason}` : ''}`,
+      fr: { title: 'Votre hôte a refusé les nouvelles dates', message: `Votre réservation garde ses dates initiales.${reason ? ` ${reason}` : ''}` },
       link: `/booking/${change.bookingId}`,
       metadata: { bookingId: String(change.bookingId) },
     });
@@ -351,6 +356,7 @@ export class BookingChangesService {
         message: change.status === DateChangeStatus.PENDING
           ? 'Your host didn’t answer in time. Your booking keeps its original dates.'
           : 'The difference wasn’t paid in time. Your booking keeps its original dates.',
+        fr: { title: 'Votre changement de dates a expiré', message: change.status === DateChangeStatus.PENDING ? "Votre hôte n'a pas répondu à temps. Votre réservation garde ses dates initiales." : "La différence n'a pas été payée à temps. Votre réservation garde ses dates initiales." },
         link: `/booking/${change.bookingId}`,
         metadata: { bookingId: String(change.bookingId) },
       });
@@ -413,12 +419,14 @@ export class BookingChangesService {
     await this.notify(String(booking.guestId), {
       title: 'Your new dates are confirmed',
       message: `Your stay is now ${when}.`,
+      fr: { title: 'Vos nouvelles dates sont confirmées', message: `Votre séjour est maintenant du ${day(change.checkIn)} au ${day(change.checkOut)}.` },
       link: `/booking/${booking._id}`,
       metadata,
     });
     await this.notify(String(booking.hostId), {
       title: 'Booking dates changed',
       message: `This stay is now ${when}.`,
+      fr: { title: 'Dates de réservation modifiées', message: `Ce séjour est maintenant du ${day(change.checkIn)} au ${day(change.checkOut)}.` },
       link: `/host/booking/${booking._id}`,
       metadata,
     });
@@ -483,7 +491,7 @@ export class BookingChangesService {
   /** The change itself is already saved: a failed notice must not undo it. */
   private async notify(
     userId: string,
-    params: { title: string; message: string; link: string; metadata: Record<string, any> },
+    params: { title: string; message: string; fr?: { title: string; message: string }; link: string; metadata: Record<string, any> },
   ): Promise<void> {
     try {
       await this.notifications.create({ userId, type: NotificationType.BOOKING_DATE_CHANGE, ...params } as any);

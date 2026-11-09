@@ -327,6 +327,7 @@ export class StudentPropertiesService {
       type: NotificationType.PROPERTY_UPDATE,
       title: 'Student-Approved badge awarded!',
       message: `Your property "${property.title}" has been awarded the Student-Approved badge and will rank higher in student housing searches.`,
+      fr: { title: 'Badge « Approuvé étudiants » obtenu !', message: `Votre logement « ${property.title} » a obtenu le badge « Approuvé étudiants » et sera mieux classé dans les recherches de logements étudiants.` },
       metadata: { propertyId, action: 'student_approved_granted' },
     }).catch((err) =>
       this.logger.warn(`Notification failed: ${err.message}`),

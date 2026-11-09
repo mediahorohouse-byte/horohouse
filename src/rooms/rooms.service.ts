@@ -68,6 +68,7 @@ export interface RoomAvailabilityResult {
 }
 
 import { CoHostsService } from '../co-hosts/co-hosts.service';
+import { parseLegacyRooms } from './legacy-rooms.util';
 
 @Injectable()
 export class RoomsService {
@@ -138,7 +139,43 @@ export class RoomsService {
         const query: any = { propertyId: new Types.ObjectId(propertyId) };
         if (!includeInactive) query.isActive = true;
 
+        await this.convertLegacyRooms(propertyId);
         return this.roomModel.find(query).sort({ roomNumber: 1, name: 1 }).exec();
+    }
+
+    /**
+     * Older hotels have their rooms only as "room:" keywords, so they couldn't be booked.
+     * The first time their rooms are asked for, this creates real room records from those
+     * keywords. It runs once per listing (claimed on the listing, so two requests at once
+     * can't create the rooms twice) and never if the listing already has rooms.
+     */
+    private async convertLegacyRooms(propertyId: string): Promise<void> {
+        try {
+            const pid = new Types.ObjectId(propertyId);
+            if (await this.roomModel.exists({ propertyId: pid })) return;
+            const claimed: any = await this.propertyModel
+                .findOneAndUpdate(
+                    { _id: pid, keywords: { $regex: '^room:' }, legacyRoomsConvertedAt: { $exists: false } },
+                    { $set: { legacyRoomsConvertedAt: new Date() } },
+                    { strict: false, strictQuery: false, new: true, projection: { keywords: 1 } } as any,
+                )
+                .lean()
+                .exec();
+            if (!claimed) return;
+            const rooms = parseLegacyRooms(claimed.keywords);
+            if (!rooms.length) return;
+            try {
+                await this.roomModel.insertMany(rooms.map((room) => ({ ...room, propertyId: pid, isActive: true })));
+            } catch (err) {
+                // Let a later request try again.
+                await this.propertyModel.updateOne({ _id: pid }, { $unset: { legacyRoomsConvertedAt: 1 } }, { strict: false } as any);
+                throw err;
+            }
+            this.logger.log(`Listing ${propertyId}: created ${rooms.length} room type(s) from its old room keywords`);
+        } catch (err: any) {
+            // The list still loads; the listing just stays as it was.
+            this.logger.warn(`Listing ${propertyId}: old room keywords not converted: ${err?.message}`);
+        }
     }
 
     async getRoomById(roomId: string): Promise<Room> {

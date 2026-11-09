@@ -457,6 +457,7 @@ export class RoommateMatchingService {
       type: NotificationType.MESSAGE,
       title: 'Someone is interested in rooming with you!',
       message: 'A student has expressed interest in matching with you. Check your roommate matches.',
+      fr: { title: 'Quelqu’un aimerait être votre colocataire !', message: 'Un étudiant souhaite être mis en relation avec vous. Consultez vos correspondances de colocation.' },
       metadata: { action: 'roommate_interest', matchId: (match._id as Types.ObjectId).toString() },
     }).catch((err) => this.logger.warn(`Notification failed: ${err.message}`));
 
@@ -712,6 +713,7 @@ export class RoommateMatchingService {
         type: NotificationType.MESSAGE,
         title: "It's a match! 🎉",
         message: 'You and your potential roommate both expressed interest. Start chatting!',
+        fr: { title: "C'est un match ! 🎉", message: 'Vous et votre futur colocataire êtes tous les deux intéressés. Commencez à discuter !' },
         metadata: {
           action: 'roommate_matched',
           matchId: (match._id as Types.ObjectId).toString(),
@@ -723,6 +725,7 @@ export class RoommateMatchingService {
         type: NotificationType.MESSAGE,
         title: "It's a match! 🎉",
         message: 'You and your potential roommate both expressed interest. Start chatting!',
+        fr: { title: "C'est un match ! 🎉", message: 'Vous et votre futur colocataire êtes tous les deux intéressés. Commencez à discuter !' },
         metadata: {
           action: 'roommate_matched',
           matchId: (match._id as Types.ObjectId).toString(),

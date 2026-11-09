@@ -29,13 +29,28 @@ export class NotificationsService {
   ) { }
 
   /**
-   * Create a new notification
+   * Create a new notification.
+   *
+   * `fr` is the same notification in French. It's used when the recipient's app is in
+   * French (users.appLanguage, which the app sends from Settings). Without it, or for
+   * anyone else, the main title and message are used.
    */
-  async create(createNotificationDto: CreateNotificationDto): Promise<Notification> {
+  async create(
+    createNotificationDto: CreateNotificationDto,
+    fr?: { title: string; message: string },
+  ): Promise<Notification> {
     const rawUserId = createNotificationDto.userId as any;
     if (!rawUserId || rawUserId === 'undefined' || rawUserId === 'null') {
       this.logger.warn(`Skipping notification creation: invalid or missing userId '${rawUserId}'`);
       throw new BadRequestException(`Invalid or missing userId '${rawUserId}'`);
+    }
+    // The French version can also come on the notification itself, as `fr`, which is
+    // handy for helpers that pass their params straight through. It's never saved.
+    const { fr: inlineFr, ...dtoWithoutFr } = createNotificationDto as CreateNotificationDto & { fr?: { title: string; message: string } };
+    createNotificationDto = dtoWithoutFr as CreateNotificationDto;
+    fr = fr ?? inlineFr;
+    if (fr && (await this.languageOf(String(rawUserId))) === 'fr') {
+      createNotificationDto = { ...createNotificationDto, title: fr.title, message: fr.message };
     }
 
     const userIdObj = Types.ObjectId.isValid(rawUserId)
@@ -85,6 +100,17 @@ export class NotificationsService {
     this.logger.log(`Notification created and sent: ${saved._id} for user ${createNotificationDto.userId}`);
     return saved;
   }
+  /** The language the user's app is set to, when the app has told us. */
+  private async languageOf(userId: string): Promise<'en' | 'fr' | undefined> {
+    if (!Types.ObjectId.isValid(userId)) return undefined;
+    try {
+      const u: any = await this.userModel.findById(userId).select('appLanguage').lean().exec();
+      return u?.appLanguage === 'fr' ? 'fr' : u?.appLanguage === 'en' ? 'en' : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /**
    * Photo for the phone notification, like Airbnb: an explicit metadata.image,
    * otherwise the main photo of the listing it's about (bookings, reviews…).
@@ -371,6 +397,7 @@ export class NotificationsService {
       type: 'inquiry' as any,
       title: 'New inquiry on your property',
       message: `${senderName} sent an inquiry about ${propertyTitle}`,
+      fr: { title: 'Nouvelle demande sur votre logement', message: `${senderName} a envoyé une demande au sujet de ${propertyTitle}` },
       link: `/dashboard/inquiry/${inquiryId}`,
       metadata: {
         propertyId,
@@ -393,6 +420,7 @@ export class NotificationsService {
       type: 'favorite' as any,
       title: 'Someone favorited your property',
       message: `${userName} added ${propertyTitle} to their favorites`,
+      fr: { title: 'Votre logement a été ajouté aux favoris', message: `${userName} a ajouté ${propertyTitle} à ses favoris` },
       link: `/properties/${propertyId}`,
       metadata: {
         propertyId,
@@ -414,6 +442,7 @@ export class NotificationsService {
       type: 'property_update' as any,
       title: 'Property status updated',
       message: `${propertyTitle} has been ${updateType}`,
+      fr: { title: 'Statut du logement mis à jour', message: `${propertyTitle} : ${updateType}` },
       link: `/properties/${propertyId}`,
       metadata: {
         propertyId,
@@ -441,6 +470,7 @@ export class NotificationsService {
       type: 'inquiry' as any,
       title: 'Agent replied to your inquiry',
       message,
+      fr: { title: "L'agent a répondu à votre demande", message: responseSnippet ? `${agentName} a répondu : ${responseSnippet}` : `${agentName} a répondu à votre demande.` },
       link: `/dashboard/inquiry/${inquiryId}`,
       metadata: {
         inquiryId,
@@ -480,6 +510,7 @@ export class NotificationsService {
           title: 'New booking request 📅',
           message: `${params.guestName} requested to book ${params.propertyTitle} ` +
             `from ${params.checkIn} to ${params.checkOut}`,
+          fr: { title: 'Nouvelle demande de réservation 📅', message: `${params.guestName} souhaite réserver ${params.propertyTitle} du ${params.checkIn} au ${params.checkOut}` },
           link: `/hosting/bookings/${params.bookingId}`,
           metadata: {
             bookingId: params.bookingId,
@@ -501,8 +532,9 @@ export class NotificationsService {
         await this.create({
           userId: params.guestId,
           type: NotificationType.BOOKING_REQUEST,
-          title: 'Demande de réservation envoyée 📩',
-          message: `Votre demande pour ${params.propertyTitle} (${params.checkIn} → ${params.checkOut}) a bien été transmise à l'hôte.`,
+          title: 'Booking request sent 📩',
+          message: `Your request for ${params.propertyTitle} (${params.checkIn} → ${params.checkOut}) has been sent to the host.`,
+          fr: { title: 'Demande de réservation envoyée 📩', message: `Votre demande pour ${params.propertyTitle} (${params.checkIn} → ${params.checkOut}) a bien été transmise à l'hôte.` },
           link: `/bookings/${params.bookingId}`,
           metadata: {
             bookingId: params.bookingId,
@@ -541,6 +573,7 @@ export class NotificationsService {
       title: 'Booking confirmed! 🎉',
       message: `Your stay at ${params.propertyTitle} has been confirmed ` +
         `(${params.checkIn} → ${params.checkOut})`,
+      fr: { title: 'Réservation confirmée ! 🎉', message: `Votre séjour à ${params.propertyTitle} est confirmé (${params.checkIn} → ${params.checkOut})` },
       link: `/bookings/${params.bookingId}`,
       metadata: {
         bookingId: params.bookingId,
@@ -575,6 +608,7 @@ export class NotificationsService {
       title: 'Booking request declined',
       message: `Unfortunately, ${params.hostName} could not accommodate your request ` +
         `for ${params.propertyTitle} (${params.checkIn} → ${params.checkOut})`,
+      fr: { title: 'Demande de réservation refusée', message: `Malheureusement, ${params.hostName} ne peut pas accepter votre demande pour ${params.propertyTitle} (${params.checkIn} → ${params.checkOut})` },
       link: `/bookings/${params.bookingId}`,
       metadata: {
         bookingId: params.bookingId,
@@ -625,6 +659,7 @@ export class NotificationsService {
       type: NotificationType.BOOKING_CANCELLED,
       title: 'Booking cancelled',
       message: otherPartyMsg,
+      fr: { title: 'Réservation annulée', message: params.cancelledByGuest ? `${params.guestName} a annulé sa réservation pour ${params.propertyTitle} (${params.checkIn} → ${params.checkOut})` : `${params.hostName} a annulé votre réservation pour ${params.propertyTitle} (${params.checkIn} → ${params.checkOut})` },
       link: `/bookings/${params.bookingId}`,
       metadata: {
         bookingId: params.bookingId,
@@ -668,6 +703,7 @@ export class NotificationsService {
       type: NotificationType.BOOKING_COMPLETED,
       title: 'Your stay is complete',
       message: `We hope you enjoyed your stay at ${params.propertyTitle}!`,
+      fr: { title: 'Votre séjour est terminé', message: `Nous espérons que vous avez apprécié votre séjour à ${params.propertyTitle} !` },
       link: `/bookings/${params.bookingId}`,
       metadata: {
         bookingId: params.bookingId,
@@ -682,6 +718,7 @@ export class NotificationsService {
       type: NotificationType.BOOKING_COMPLETED,
       title: 'Stay completed',
       message: `${params.guestName}'s stay at ${params.propertyTitle} has ended.`,
+      fr: { title: 'Séjour terminé', message: `Le séjour de ${params.guestName} à ${params.propertyTitle} est terminé.` },
       link: `/hosting/bookings/${params.bookingId}`,
       metadata: {
         bookingId: params.bookingId,
@@ -724,6 +761,7 @@ export class NotificationsService {
       title: 'Check-in tomorrow! 🏠',
       message: `Your stay at ${params.propertyTitle} begins tomorrow${timeStr}. ` +
         `Make sure you have the host's contact details ready.`,
+      fr: { title: 'Arrivée demain ! 🏠', message: `Votre séjour à ${params.propertyTitle} commence demain${params.checkInTime ? ` à ${params.checkInTime}` : ''}. Gardez les coordonnées de votre hôte à portée de main.` },
       link: `/bookings/${params.bookingId}`,
       metadata: {
         bookingId: params.bookingId,
@@ -760,6 +798,7 @@ export class NotificationsService {
       type: NotificationType.REVIEW_REQUEST,
       title: 'How was your stay?',
       message: `Share your experience at ${params.propertyTitle} — your review helps other travellers.`,
+      fr: { title: "Comment s'est passé votre séjour ?", message: `Racontez votre séjour à ${params.propertyTitle} : votre avis aide les autres voyageurs.` },
       link: `/bookings/${params.bookingId}/review`,
       metadata: {
         bookingId: params.bookingId,
@@ -774,6 +813,7 @@ export class NotificationsService {
       type: NotificationType.REVIEW_REQUEST,
       title: 'Review your guest',
       message: `How was ${params.guestName} as a guest? Leave a review to help other hosts.`,
+      fr: { title: 'Évaluez votre voyageur', message: `Comment s'est passé le séjour avec ${params.guestName} ? Laissez un avis pour aider les autres hôtes.` },
       link: `/hosting/bookings/${params.bookingId}/review`,
       metadata: {
         bookingId: params.bookingId,
@@ -806,6 +846,7 @@ export class NotificationsService {
       title: `New ${params.rating}★ review on ${params.propertyTitle}`,
       message: `${params.guestName} left a review for ${params.propertyTitle}. ` +
         `It will be published once both sides have reviewed.`,
+      fr: { title: `Nouvel avis ${params.rating}★ sur ${params.propertyTitle}`, message: `${params.guestName} a laissé un avis sur ${params.propertyTitle}. Il sera publié quand vous aurez tous les deux laissé le vôtre.` },
       link: `/hosting/reviews/${params.reviewId}`,
       metadata: {
         reviewId: params.reviewId,
@@ -845,6 +886,7 @@ export class NotificationsService {
         type: NotificationType.REVIEW_PUBLISHED,
         title: 'Your review is now public',
         message: `Reviews for your stay at ${params.propertyTitle} are now visible to everyone.`,
+        fr: { title: 'Votre avis est maintenant public', message: `Les avis sur votre séjour à ${params.propertyTitle} sont maintenant visibles par tous.` },
         link: `/bookings/${params.bookingId}/review`,
         metadata: sharedMeta,
       }),
@@ -853,6 +895,7 @@ export class NotificationsService {
         type: NotificationType.REVIEW_PUBLISHED,
         title: 'Reviews published',
         message: `Reviews for the stay at ${params.propertyTitle} are now visible.`,
+        fr: { title: 'Avis publiés', message: `Les avis sur le séjour à ${params.propertyTitle} sont maintenant visibles.` },
         link: `/hosting/reviews`,
         metadata: sharedMeta,
       }),
@@ -878,6 +921,7 @@ export class NotificationsService {
       type: NotificationType.REVIEW_RESPONSE,
       title: `${params.hostName} responded to your review`,
       message: `The host of ${params.propertyTitle} has responded to your review.`,
+      fr: { title: `${params.hostName} a répondu à votre avis`, message: `L'hôte de ${params.propertyTitle} a répondu à votre avis.` },
       link: `/reviews/${params.reviewId}`,
       metadata: {
         reviewId: params.reviewId,
@@ -908,9 +952,9 @@ export class NotificationsService {
       availableOn?: Date;
     },
   ): Promise<void> {
-    const when = params.availableOn
-      ? ` You can withdraw it from ${params.availableOn.toISOString().split('T')[0]}, about a day after check-in.`
-      : '';
+    const day = params.availableOn?.toISOString().split('T')[0];
+    const when = day ? ` You can withdraw it from ${day}, about a day after check-in.` : '';
+    const quand = day ? ` Vous pourrez le retirer à partir du ${day}, environ un jour après l'arrivée.` : '';
     await this.create({
       userId: hostId,
       type: NotificationType.PAYMENT_RECEIVED,
@@ -925,6 +969,10 @@ export class NotificationsService {
         amount: params.amount,
         currency: params.currency,
       },
+    }, {
+      title: 'Paiement reçu',
+      message: `Paiement de ${params.amount} ${params.currency} reçu pour la réservation de ` +
+        `${params.guestName} à ${params.propertyTitle}.${quand}`,
     });
   }
 
@@ -952,6 +1000,7 @@ export class NotificationsService {
       title: 'Refund processed',
       message: `A refund of ${params.amount} ${params.currency} has been issued ` +
         `for your ${params.forStay ? 'stay' : 'cancelled booking'} at ${params.propertyTitle}.`,
+      fr: { title: 'Remboursement effectué', message: `Un remboursement de ${params.amount} ${params.currency} a été effectué pour votre ${params.forStay ? 'séjour' : 'réservation annulée'} à ${params.propertyTitle}.` },
       link: `/bookings/${params.bookingId}`,
       metadata: {
         bookingId: params.bookingId,

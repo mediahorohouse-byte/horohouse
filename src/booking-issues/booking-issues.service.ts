@@ -101,6 +101,7 @@ export class BookingIssuesService {
       message: issue.payoutFrozen
         ? 'A guest reported a problem with their stay. Your payout for it is on hold until we review it. Add your side now.'
         : 'A guest reported a problem with their stay. Add your side now.',
+      fr: { title: 'Un voyageur a signalé un problème', message: issue.payoutFrozen ? "Un voyageur a signalé un problème avec son séjour. Votre versement est bloqué le temps que nous l'examinions. Donnez votre version maintenant." : 'Un voyageur a signalé un problème avec son séjour. Donnez votre version maintenant.' },
       link: `/host/booking/${bookingId}`,
       metadata: { bookingId, propertyId: String(booking.propertyId) },
     });
@@ -108,6 +109,7 @@ export class BookingIssuesService {
       type: NotificationType.BOOKING_ISSUE,
       title: 'A guest reported a problem',
       message: 'A guest reported a problem with their stay. Add your side now.',
+      fr: { title: 'Un voyageur a signalé un problème', message: 'Un voyageur a signalé un problème avec son séjour. Donnez votre version maintenant.' },
       link: `/host/booking/${bookingId}`,
       metadata: { bookingId, propertyId: String(booking.propertyId) },
     });
@@ -252,12 +254,14 @@ export class BookingIssuesService {
     await this.notify(String(booking.guestId), {
       title: 'We reviewed your report',
       message: `${summary} ${dto.note}`,
+      fr: { title: 'Nous avons examiné votre signalement', message: `${refundAmount > 0 ? `${refundAmount} ${booking.currency ?? 'XAF'} ont été remboursés au voyageur.` : "Aucun remboursement n'a été accordé."} ${dto.note}` },
       link: `/booking/${bookingId}`,
       metadata: { bookingId, propertyId: String(booking.propertyId) },
     });
     await this.notify(String(booking.hostId), {
       title: 'We reviewed the reported problem',
       message: `${summary} ${dto.note}`,
+      fr: { title: 'Nous avons examiné le problème signalé', message: `${refundAmount > 0 ? `${refundAmount} ${booking.currency ?? 'XAF'} ont été remboursés au voyageur.` : "Aucun remboursement n'a été accordé."} ${dto.note}` },
       link: `/host/booking/${bookingId}`,
       metadata: { bookingId, propertyId: String(booking.propertyId) },
     });
@@ -321,7 +325,7 @@ export class BookingIssuesService {
   /** The report and the decision are already saved: a failed notice must not undo them. */
   private async notify(
     userId: string,
-    params: { title: string; message: string; link: string; metadata: Record<string, any> },
+    params: { title: string; message: string; fr?: { title: string; message: string }; link: string; metadata: Record<string, any> },
   ): Promise<void> {
     try {
       await this.notifications.create({ userId, type: NotificationType.BOOKING_ISSUE, ...params } as any);

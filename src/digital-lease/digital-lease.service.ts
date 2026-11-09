@@ -460,6 +460,7 @@ export class DigitalLeaseService {
           type: NotificationType.SYSTEM,
           title: 'Lease terminated',
           message: `The lease for your property has been terminated. Reason: ${dto.reason}`,
+          fr: { title: 'Bail résilié', message: `Le bail de votre logement a été résilié. Motif : ${dto.reason}` },
           metadata: { leaseId },
         }),
       ),
@@ -515,6 +516,7 @@ export class DigitalLeaseService {
           type: NotificationType.SYSTEM,
           title: 'Lease activated!',
           message: 'All parties have signed. Your lease is now active.',
+          fr: { title: 'Bail activé !', message: 'Toutes les parties ont signé. Votre bail est maintenant actif.' },
           metadata: { leaseId: (lease._id as Types.ObjectId).toString() },
         }),
       ),
@@ -592,6 +594,7 @@ export class DigitalLeaseService {
           type: NotificationType.SYSTEM,
           title: 'Lease ready for your signature',
           message: 'Your landlord has signed the lease. Please review and sign to activate it.',
+          fr: { title: 'Bail prêt à signer', message: 'Votre propriétaire a signé le bail. Relisez-le et signez-le pour l’activer.' },
           metadata: {
             leaseId: (lease._id as Types.ObjectId).toString(),
             action: 'sign_lease',
