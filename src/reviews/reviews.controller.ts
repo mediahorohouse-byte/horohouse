@@ -103,11 +103,15 @@ export class ReviewsController {
   @ApiQuery({ name: 'sortBy', required: false, type: String })
   @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'] })
   async getPropertyReviews(@Param('propertyId') propertyId: string, @Query() query: any) {
+    const sort = ['relevant', 'recent', 'highest', 'lowest'].includes(query.sort) ? query.sort : undefined;
     return this.reviewsService.getPropertyReviews(propertyId, {
       page: query.page ? parseInt(query.page) : 1,
       limit: query.limit ? parseInt(query.limit) : 20,
       sortBy: query.sortBy || 'createdAt',
       sortOrder: query.sortOrder || 'desc',
+      sort,
+      q: typeof query.q === 'string' ? query.q.slice(0, 100) : undefined,
+      topic: typeof query.topic === 'string' ? query.topic : undefined,
     });
   }
 

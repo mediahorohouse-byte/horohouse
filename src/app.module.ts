@@ -30,6 +30,7 @@ import { AppointmentsModule } from './appointments/appointments.module';
 import { SystemSettingsModule } from './system-settings/system-settings.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { ReportsModule } from './reports/reports.module';
+import { FeedbackModule } from './feedback/feedback.module';
 import { RoomsModule } from './rooms/rooms.module';
 import { StudentProfilesModule } from './student-profiles/student-profiles.module';
 import { StudentPropertiesModule } from './student-properties/student-properties.module';
@@ -118,6 +119,7 @@ import { TranslationsModule } from './translations/translations.module';
     SystemSettingsModule,
     BookingsModule,
     ReportsModule,
+    FeedbackModule,
     RoomsModule,
     StudentProfilesModule,
     StudentPropertiesModule,

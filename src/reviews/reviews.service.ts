@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   ConflictException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -15,7 +16,9 @@ import { Property, PropertyDocument } from '../properties/schemas/property.schem
 import { Booking, BookingDocument, BookingStatus } from '../bookings/schema/booking.schema';
 import { Appointment, AppointmentDocument, AppointmentStatus } from '../appointments/schemas/appointment.schema';
 import { DigitalLease, DigitalLeaseDocument, LeaseStatus } from '../digital-lease/schemas/digital-lease.schema';
+import { Room, RoomDocument } from '../rooms/schemas/room.schema';
 import { CreateReviewDto, UpdateReviewDto, RespondReviewDto } from './dto';
+import { countMentions, fold, isReviewTopic, topicsOf } from './review-topics.util';
 
 // ─── How many days after checkout guests/hosts can still leave a review ───────
 const REVIEW_WINDOW_DAYS = 14;
@@ -32,6 +35,12 @@ export interface ReviewFilters {
   minRating?: number;
   maxRating?: number;
   verified?: boolean;
+}
+
+export interface PropertyReviewQuery {
+  sort?: 'relevant' | 'recent' | 'highest' | 'lowest';
+  q?: string;
+  topic?: string;
 }
 
 export interface ReviewOptions {
@@ -54,6 +63,7 @@ export class ReviewsService {
     @InjectModel(Booking.name) private bookingModel: Model<BookingDocument>,
     @InjectModel(Appointment.name) private appointmentModel: Model<AppointmentDocument>,
     @InjectModel(DigitalLease.name) private leaseModel: Model<DigitalLeaseDocument>,
+    @Optional() @InjectModel(Room.name) private roomModel?: Model<RoomDocument>,
   ) { }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -445,12 +455,74 @@ export class ReviewsService {
     return { reviews, total, page, totalPages: Math.ceil(total / limit), averageRating };
   }
 
-  async getPropertyReviews(propertyId: string, options: ReviewOptions = {}): Promise<any> {
-    // Return both PROPERTY and STAY reviews for the same property
-    return this.findAll(
-      { propertyId },
-      options,
-    );
+  /**
+   * A listing's published reviews, the way Airbnb lists them:
+   *  - sort: relevant (detailed reviews first, then newest) | recent | highest | lowest
+   *  - q: words to find in the text; topic: one of the "Guests mention" topics
+   *    (both ignore case and accents, which Mongo regexes can't, so they're done here;
+   *    a listing has at most a few hundred reviews)
+   *  - each review also says how long the stay was, which room it was in, and since
+   *    when the reviewer has been a member
+   */
+  async getPropertyReviews(propertyId: string, options: ReviewOptions & PropertyReviewQuery = {}): Promise<any> {
+    if (!Types.ObjectId.isValid(propertyId)) throw new BadRequestException('Invalid property ID');
+    const page = Math.max(1, Number(options.page) || 1);
+    const limit = Math.min(Math.max(1, Number(options.limit) || 20), 50);
+
+    const all: any[] = await this.reviewModel
+      .find({ propertyId: new Types.ObjectId(propertyId), isActive: true, isPublished: true })
+      .populate('userId', 'name profilePicture createdAt')
+      .populate('respondedBy', 'name profilePicture')
+      .lean()
+      .exec();
+
+    const words = fold(options.q ?? '').trim().split(/\s+/).filter(Boolean).slice(0, 8);
+    const topic = isReviewTopic(options.topic) ? options.topic : undefined;
+    const matching = all.filter((r) => {
+      if (topic && !topicsOf(r.comment).includes(topic)) return false;
+      if (!words.length) return true;
+      const text = fold(r.comment);
+      return words.every((w) => text.includes(w));
+    });
+
+    const time = (r: any) => new Date(r.createdAt).getTime() || 0;
+    const sort = options.sort ?? (options.sortBy === 'rating' ? (options.sortOrder === 'asc' ? 'lowest' : 'highest') : 'relevant');
+    const detailed = (r: any) => (String(r.comment ?? '').trim().length >= 80 ? 1 : 0);
+    matching.sort((a, b) => {
+      if (sort === 'recent') return time(b) - time(a);
+      if (sort === 'highest') return b.rating - a.rating || time(b) - time(a);
+      if (sort === 'lowest') return a.rating - b.rating || time(b) - time(a);
+      return detailed(b) - detailed(a) || time(b) - time(a);
+    });
+
+    const pageItems = matching.slice((page - 1) * limit, page * limit);
+    await this.attachStays(pageItems);
+
+    const averageRating = all.length ? Number((all.reduce((s, r) => s + (r.rating || 0), 0) / all.length).toFixed(2)) : 0;
+    return { reviews: pageItems, total: matching.length, page, totalPages: Math.ceil(matching.length / limit), averageRating };
+  }
+
+  /** Adds `stay: { nights, roomName }` from each review's booking, when it has one. */
+  private async attachStays(reviews: any[]): Promise<void> {
+    const ids = reviews.map((r) => r.bookingId).filter((id) => id && Types.ObjectId.isValid(String(id)));
+    if (!ids.length) return;
+    try {
+      const bookings: any[] = await this.bookingModel.find({ _id: { $in: ids } }).select('nights roomId').lean().exec();
+      const roomIds = bookings.map((b) => b.roomId).filter(Boolean);
+      const rooms: any[] = roomIds.length && this.roomModel
+        ? await this.roomModel.find({ _id: { $in: roomIds } }).select('name').lean().exec()
+        : [];
+      const roomName = new Map(rooms.map((x) => [String(x._id), x.name]));
+      const byId = new Map(bookings.map((b) => [String(b._id), b]));
+      for (const r of reviews) {
+        const b = byId.get(String(r.bookingId));
+        if (!b) continue;
+        r.stay = { nights: b.nights, ...(b.roomId && roomName.get(String(b.roomId)) ? { roomName: roomName.get(String(b.roomId)) } : {}) };
+      }
+    } catch (err: any) {
+      // The reviews still show, without the stay details.
+      this.logger.warn(`Stay details for reviews not loaded: ${err?.message}`);
+    }
   }
 
   /**
@@ -475,7 +547,7 @@ export class ReviewsService {
         isActive: true,
         isPublished: true,
       })
-      .select('rating staySubRatings reviewType')
+      .select('rating staySubRatings reviewType comment')
       .lean()
       .exec();
 
@@ -484,8 +556,18 @@ export class ReviewsService {
     // Compute sub-rating averages from STAY reviews only
     const stayReviews = reviews.filter((r: any) => r.reviewType === ReviewType.STAY);
     const subRatingAverages = this.calculateSubRatingAverages(stayReviews);
+    const exact = reviews.length ? reviews.reduce((s: number, r: any) => s + (r.rating || 0), 0) / reviews.length : 0;
 
-    return { ...base, subRatingAverages };
+    return {
+      ...base,
+      subRatingAverages,
+      // The names the app reads (it used to read these and get nothing), with two decimals like Airbnb
+      average: Number(exact.toFixed(2)),
+      count: base.totalReviews,
+      distribution: base.ratingDistribution,
+      subRatings: subRatingAverages,
+      mentions: countMentions(reviews.map((r: any) => r.comment)),
+    } as any;
   }
 
   /**
